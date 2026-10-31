@@ -127,6 +127,8 @@ class OneBotTests(unittest.IsolatedAsyncioTestCase):
         started = asyncio.Event()
         release = asyncio.Event()
         finished = asyncio.Event()
+        disconnect = asyncio.Event()
+        disconnected = asyncio.Event()
 
         async def on_event(event, generation):
             started.set()
@@ -136,10 +138,14 @@ class OneBotTests(unittest.IsolatedAsyncioTestCase):
         async def handler(ws):
             await ws.send(json.dumps({"post_type": "message"}))
             await started.wait()
+            await disconnect.wait()
             await ws.close()
+            disconnected.set()
 
         client, _ = await self.start(handler, on_event)
         await asyncio.wait_for(started.wait(), 1)
+        disconnect.set()
+        await asyncio.wait_for(disconnected.wait(), 1)
         await client.close()
         release.set()
         await asyncio.wait_for(finished.wait(), 1)
