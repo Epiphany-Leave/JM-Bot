@@ -3,5 +3,7 @@
 !requirements.txt
 !jm_bot/
 !jm_bot/**
+!samples/
+!samples/test.pdf
 **/__pycache__/
 **/*.py[cod]

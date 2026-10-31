@@ -2,36 +2,37 @@ name: jm-bot
 
 services:
   jm-bot:
-    image: ghcr.io/epiphany-leave/jm-bot:1.0.1
+    image: ghcr.io/epiphany-leave/jm-bot:1.1.0-rc.1
     platform: linux/amd64
     restart: unless-stopped
-    depends_on:
-      - napcat
     environment:
       TZ: Asia/Shanghai
-      ONEBOT_WS_URL: ws://napcat:3001/
-      ONEBOT_TOKEN: "REPLACE_WITH_YOUR_ONEBOT_TOKEN"
-      GROUP_ALLOW_ALL: "true"
-      # 私聊用户白名单；群全员模式无需逐个填写群成员。
-      ALLOWED_USERS: ""
-      # 多个号码用英文逗号隔开；空字符串禁止所有群。
-      ALLOWED_GROUPS: ""
-      DOWNLOAD_DIR: /downloads
+      # 唯一需要填写的值：至少 12 个字符，建议使用随机英文字母和数字。
+      ADMIN_PASSWORD: "REPLACE_WITH_YOUR_ADMIN_PASSWORD"
+    ports:
+      - "16099:8080"
     volumes:
+      - ./data:/data
+      - ./napcat-config:/napcat-config
       - ./downloads:/downloads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   napcat:
     image: mlikiowa/napcat-docker:v4.18.42
     restart: unless-stopped
+    depends_on:
+      jm-bot:
+        condition: service_healthy
     environment:
       TZ: Asia/Shanghai
       MODE: ws
       NAPCAT_UID: "1000"
       NAPCAT_GID: "1000"
-      # 自行生成，必须与 ONEBOT_TOKEN 使用不同口令。
-      WEBUI_TOKEN: "REPLACE_WITH_YOUR_WEBUI_TOKEN"
-    ports:
-      - "16099:6099"
     volumes:
       - ./napcat-config:/app/napcat/config
       - ./qq-data:/app/.config/QQ

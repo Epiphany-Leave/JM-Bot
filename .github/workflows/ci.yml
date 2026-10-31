@@ -25,15 +25,30 @@ jobs:
         run: |
           python -m pip install -r requirements.txt
           python -m unittest discover -s tests -v
+          python scripts/package.py
+      - name: Check WebUI in Chromium
+        run: |
+          python -m pip install playwright==1.64.1
+          python -m playwright install --with-deps chromium
+          python scripts/webui_browser.py
+      - name: Upload WebUI screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: webui-browser
+          path: .cache/webui-browser/**/*.png
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
       - name: Build linux/amd64 image
         run: |
           docker compose config --quiet
           docker build --platform linux/amd64 -t jm-bot:ci .
       - name: Check container imports and image size
         run: |
-          docker run --rm jm-bot:ci python -c "import jm_bot, jmcomic, img2pdf, websockets; print('container imports OK')"
+          docker run --rm jm-bot:ci python -c "import jm_bot, jmcomic, img2pdf, websockets, aiohttp, qrcode; from pathlib import Path; assert Path('/app/samples/test.pdf').is_file(); print('container imports and test PDF OK')"
           docker image inspect jm-bot:ci --format 'platform={{.Os}}/{{.Architecture}} size_bytes={{.Size}}'
-      - name: Start service against offline OneBot mock and measure idle RSS
+      - name: Check offline WebUI startup, authentication, persistence and idle RSS
         run: python scripts/container_smoke.py --image jm-bot:ci
       - name: Publish tested version to GHCR
         if: startsWith(github.ref, 'refs/tags/v')
@@ -42,7 +57,7 @@ jobs:
           GHCR_USER: ${{ github.actor }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Expected vMAJOR.MINOR.PATCH'; exit 1; }
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]] || { echo 'Expected vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-rc.N'; exit 1; }
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
           image="ghcr.io/epiphany-leave/jm-bot:${RELEASE_TAG#v}"
           docker tag jm-bot:ci "$image"
@@ -67,7 +82,6 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          python -m pip install websockets==17.4
           export DOCKER_CONFIG="$(mktemp -d)"
           image="ghcr.io/epiphany-leave/jm-bot:${RELEASE_TAG#v}"
           docker pull --platform linux/amd64 "$image"

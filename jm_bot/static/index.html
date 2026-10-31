@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>JM · 机器人管理</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <main id="login-view" class="login-wrap">
+    <section class="login-card" aria-labelledby="login-heading">
+      <div class="brand-mark" aria-hidden="true">JM</div>
+      <p class="eyebrow">自己的 QQ 文件助手</p>
+      <h1 id="login-heading">欢迎回来</h1>
+      <p class="muted">登录后，连接 QQ 并设置谁可以使用机器人。</p>
+      <form id="login-form">
+        <label for="password">管理密码</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
+        <p id="login-error" class="feedback error" role="alert" hidden></p>
+        <button class="primary full" type="submit">登录管理台 <span aria-hidden="true">→</span></button>
+      </form>
+      <p class="login-note">使用部署时设置的管理密码。</p>
+    </section>
+  </main>
+
+  <div id="app-view" class="app-shell" hidden>
+    <aside class="sidebar">
+      <a class="brand" href="#overview" aria-label="JM 管理台首页"><span class="brand-mark" aria-hidden="true">JM</span><span>JM 管理台<small>QQ 文件助手</small></span></a>
+      <nav aria-label="主导航">
+        <button class="nav-item active" data-tab="overview" aria-current="page"><span aria-hidden="true">◈</span> 概览</button>
+        <button class="nav-item" data-tab="qq"><span aria-hidden="true">◎</span> QQ 登录</button>
+        <button class="nav-item" data-tab="permissions"><span aria-hidden="true">⊞</span> 使用权限</button>
+      </nav>
+      <div class="sidebar-bottom"><span class="local-note"><i aria-hidden="true"></i> 你的 NAS · 自己管理</span><button id="logout" class="text-button">退出登录</button></div>
+    </aside>
+
+    <main class="main-content">
+      <header class="page-header"><div><p class="eyebrow">JM BOT / 控制台</p><h1 id="page-title">运行概览</h1></div><span id="header-state" class="pill neutral">正在连接</span></header>
+      <div id="global-error" class="banner error" role="alert" hidden></div>
+
+      <section id="tab-overview" class="tab-panel" aria-labelledby="page-title">
+        <div id="ready-card" class="hero-card">
+          <div class="hero-icon" aria-hidden="true">↗</div><div><p class="eyebrow">机器人状态</p><h2 id="ready-title">正在了解运行状态</h2><p id="next-step">请稍候，正在连接你的机器人。</p></div>
+          <button id="connect-qq" class="light-button">前往 QQ 登录 <span aria-hidden="true">→</span></button>
+        </div>
+        <div class="status-grid">
+          <article class="card status-card"><span class="card-label">QQ 账号</span><strong id="qq-name">等待连接</strong><span id="qq-status" class="status-detail">正在读取状态</span></article>
+          <article class="card status-card"><span class="card-label">消息通道</span><strong id="channel-state">连接中</strong><span id="channel-detail" class="status-detail">正在检查消息连接</span></article>
+          <article class="card status-card"><span class="card-label">当前任务</span><strong id="task-state">等待状态</strong><span id="task-detail" class="status-detail">单次处理一本，完成后可继续</span></article>
+        </div>
+        <div class="detail-grid">
+          <article class="card"><div class="section-heading"><div><p class="eyebrow">先试一试</p><h2>发送测试 PDF</h2></div><span class="subtle-icon" aria-hidden="true">↗</span></div><p class="muted">发送一份普通 PDF，检查机器人能否回传文件。每次点击只发送一次。</p>
+            <form id="test-form"><label for="test-target">接收位置</label><select id="test-target" required><option value="">请先设置使用权限</option></select><button id="test-submit" class="primary" type="submit" disabled>发送测试文件</button></form>
+            <p id="test-feedback" class="feedback" role="status" hidden></p>
+          </article>
+          <article class="card"><div class="section-heading"><div><p class="eyebrow">最近一次</p><h2>任务结果</h2></div></div><div id="result-empty" class="empty-state"><span aria-hidden="true">▤</span><p>还没有任务结果</p><small>发送指令后，可以在这里查看处理情况。</small></div><div id="result-content" hidden><span id="result-status" class="pill neutral"></span><p id="result-message" class="result-message"></p><div id="retained-file" class="path-box" hidden><span>NAS 保留文件</span><code id="result-path"></code><small>请先检查 QQ 是否已收到文件，再决定是否重新操作。</small></div></div></article>
+        </div>
+        <aside class="instruction-strip"><strong>开始使用</strong><p>在已授权的 QQ 私聊或群聊中发送 <code>/jm &lt;本子 ID&gt;</code>，机器人会下载整本并回传 PDF。</p></aside>
+      </section>
+
+      <section id="tab-qq" class="tab-panel" hidden aria-labelledby="page-title">
+        <div class="qq-grid"><article class="card qr-card"><p class="eyebrow">连接你的 QQ</p><h2 id="qr-title">扫码登录</h2><p id="qr-hint" class="muted">使用手机 QQ 扫描二维码，并在手机上确认。</p><div id="qr-frame" class="qr-frame"><img id="qr-image" alt="QQ 登录二维码" hidden><div id="qr-placeholder" class="qr-placeholder">正在获取登录状态…</div></div><button id="refresh-qr" class="secondary">刷新二维码</button><p id="qr-feedback" class="feedback" role="status" hidden></p></article><article class="card steps-card"><h2>只需连接一次</h2><ol class="steps"><li><span>1</span><div><strong>打开手机 QQ</strong><p>使用准备作为机器人的 QQ 账号扫码。</p></div></li><li><span>2</span><div><strong>在手机上确认登录</strong><p>如果 QQ 要求验证，请按手机提示完成。</p></div></li><li><span>3</span><div><strong>设置使用权限</strong><p>选择允许使用的群聊，并添加私聊用户。</p></div></li></ol><div class="soft-note">登录状态会保存在 NAS 中。二维码失效时，点击刷新即可。</div><button id="go-permissions" class="text-button">前往设置使用权限 →</button></article></div>
+      </section>
+
+      <section id="tab-permissions" class="tab-panel" hidden aria-labelledby="page-title">
+        <div class="section-intro"><div><h2>让合适的人使用</h2><p class="muted">保存后立即生效。未授权的私聊和群聊无法使用下载指令。</p></div><span id="unsaved" class="pill amber" hidden>有未保存的修改</span></div>
+        <form id="permissions-form">
+          <article class="card permission-card"><div class="section-heading"><div><p class="eyebrow">群聊权限</p><h2>允许使用的群</h2></div><button id="reload-groups" class="secondary small" type="button">刷新群列表</button></div><p class="muted">选择机器人已加入的群。未选中的群一律不开放。</p><p id="groups-feedback" class="feedback" role="status" hidden></p><div id="group-list" class="group-list" aria-label="群聊选择">正在加载群列表…</div>
+            <fieldset class="mode-fieldset"><legend>选中群聊中的哪些人可以使用？</legend><label class="radio-option"><input type="radio" name="group-mode" value="all" checked><span><strong>群内所有成员</strong><small>在选中的群里，所有成员都可以发起下载。</small></span></label><label class="radio-option"><input type="radio" name="group-mode" value="listed"><span><strong>仅下方指定的用户</strong><small>需要同时在选中的群内，且 QQ 号在用户列表中。</small></span></label></fieldset>
+          </article>
+          <article class="card permission-card"><p class="eyebrow">用户权限</p><h2>允许使用的 QQ 号</h2><p class="muted">这些用户可以私聊机器人。群聊选“仅指定的用户”时，也使用这份名单。</p><label for="allowed-users">QQ 号列表</label><textarea id="allowed-users" rows="5" placeholder="每行一个 QQ 号，也可以用逗号分隔" spellcheck="false" inputmode="numeric"></textarea><p class="field-note">只填写正整数 QQ 号。列表为空时，所有私聊请求都会被拒绝。</p></article>
+          <div class="save-bar"><p id="permissions-feedback" class="feedback" role="status" hidden></p><button id="save-permissions" class="primary" type="submit">保存使用权限</button></div>
+        </form>
+      </section>
+      <footer class="page-footer">简单连接，按需使用。<span>状态每 3 秒自动更新</span></footer>
+    </main>
+  </div>
+</body>
+</html>

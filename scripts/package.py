@@ -8,12 +8,19 @@ from zipfile import ZIP_DEFLATED, ZipFile
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_FILES = (
     ".gitignore", ".dockerignore", "LICENSE", "Dockerfile", "requirements.txt", "compose.yaml", "README.md",
-    ".github/workflows/ci.yml", "docs/decisions-standalone.md", "docs/verification.md", "samples/test.pdf",
-    "jm_bot/__init__.py", "jm_bot/__main__.py", "jm_bot/config.py", "jm_bot/bot.py",
-    "jm_bot/downloader.py", "jm_bot/onebot.py", "scripts/package.py", "scripts/container_smoke.py",
-    "tests/__init__.py", "tests/test_bot.py", "tests/test_config.py",
-    "tests/test_downloader.py", "tests/test_onebot.py", "tests/test_integration.py",
+    "samples/test.pdf",
 )
+
+
+def source_files() -> list[tuple[Path, str]]:
+    names = set(SOURCE_FILES)
+    for folder in ("jm_bot", "scripts", "tests"):
+        names.update(path.relative_to(ROOT).as_posix() for path in (ROOT / folder).rglob("*.py"))
+    for folder, pattern in (("docs", "*.md"), (".github/workflows", "*.yml")):
+        names.update(path.relative_to(ROOT).as_posix() for path in (ROOT / folder).rglob(pattern))
+    static = ROOT / "jm_bot" / "static"
+    names.update(path.relative_to(ROOT).as_posix() for path in static.rglob("*") if path.is_file())
+    return [(ROOT / name, name) for name in sorted(names) if "__pycache__" not in Path(name).parts]
 
 
 def write_zip(destination: Path, files: list[tuple[Path, str]]) -> None:
@@ -29,7 +36,7 @@ def main() -> None:
     dist = ROOT / "dist"
     dist.mkdir(exist_ok=True)
     source = dist / "jm-bot-source.zip"
-    write_zip(source, [(ROOT / name, name) for name in SOURCE_FILES])
+    write_zip(source, source_files())
     deployment = dist / "jm-bot-deploy.zip"
     write_zip(deployment, [
         (ROOT / "compose.yaml", "compose.yaml"),

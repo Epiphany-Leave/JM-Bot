@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import tempfile
 import time
+from dataclasses import replace
 
 from .config import Settings, positive_id
 from .downloader import download_pdf
@@ -43,6 +44,17 @@ class JMBot:
         self._handlers = set()
         self._closing = False
         self._seen = OrderedDict()
+        self.current_task = None
+        self.last_result = None
+
+    @property
+    def busy(self) -> bool:
+        return self._lock.locked()
+
+    def update_permissions(self, value: dict) -> None:
+        self.settings = replace(self.settings, allowed_users=frozenset(value["allowed_users"]),
+                                allowed_groups=frozenset(value["allowed_groups"]),
+                                group_allow_all=value["group_allow_all"])
 
     def _available(self, generation: int) -> bool:
         return not self._closing and self.client.connected and self.client.generation == generation
@@ -114,60 +126,122 @@ class JMBot:
             return
 
         async with self._lock:
-            await self._reply(target, generation, f"已开始处理 JM {album_id}，完成后发送 PDF。")
-            if not self._available(generation):
-                return
-            job = None
-            retain_pdf = False
+            self.current_task = {"album_id": album_id, "stage": "下载并生成 PDF"}
             try:
-                try:
-                    job = Path(tempfile.mkdtemp(prefix="job_", dir=self.data_dir))
-                    # mkdtemp defaults to 0700; NapCat needs to traverse this directory as another UID.
-                    job.chmod(0o755)
-                    worker = asyncio.get_running_loop().run_in_executor(None, download_pdf, album_id, job)
-                    try:
-                        pdf = await asyncio.shield(worker)
-                    except asyncio.CancelledError:
-                        # Keep the lock and files until the thread really stops, even after repeated cancellation.
-                        while True:
-                            try:
-                                await asyncio.shield(worker)
-                                retain_pdf = True
-                                break
-                            except asyncio.CancelledError:
-                                continue
-                            except Exception:
-                                log.exception("取消时等待下载线程结束失败")
-                                break
-                        raise
-                except Exception:
-                    log.exception("下载或 PDF 合成失败")
-                    await self._reply(target, generation, "下载或 PDF 合成失败，未发送文件；请查看 jm-bot 日志。")
-                    return
-
-                retain_pdf = True
-                if not self._available(generation):
-                    log.warning("连接已变化，不自动上传；PDF 保留于 %s", pdf)
-                    return
-                try:
-                    action = "upload_group_file" if group else "upload_private_file"
-                    await self.client.call(action, **target, file=str(pdf.resolve()), name=pdf.name, upload_file=True)
-                except Exception:
-                    log.exception("上传结果未确认，PDF 保留于 %s", pdf)
-                    await self._reply(target, generation,
-                                      "PDF 发送结果未确认，请先检查 QQ，避免重复发送。\n"
-                                      f"PDF 已保留，NAS 文件（相对项目目录）：downloads/{job.name}/{pdf.name}")
-                    return
-                retain_pdf = False
-                await self._reply(target, generation, "PDF 已上传。")
+                await self._process(album_id, group, target, generation)
             finally:
-                if job is not None:
+                self.current_task = None
+
+    async def _process(self, album_id, group, target, generation):
+        await self._reply(target, generation, f"已开始处理 JM {album_id}，完成后发送 PDF。")
+        if not self._available(generation):
+            return
+        job = None
+        retain_pdf = False
+        try:
+            try:
+                job = Path(tempfile.mkdtemp(prefix="job_", dir=self.data_dir))
+                # mkdtemp defaults to 0700; NapCat needs to traverse this directory as another UID.
+                job.chmod(0o755)
+                worker = asyncio.get_running_loop().run_in_executor(None, download_pdf, album_id, job)
+                try:
+                    pdf = await asyncio.shield(worker)
+                except asyncio.CancelledError:
+                    # Keep the lock and files until the thread really stops, even after repeated cancellation.
+                    while True:
+                        try:
+                            await asyncio.shield(worker)
+                            retain_pdf = True
+                            break
+                        except asyncio.CancelledError:
+                            continue
+                        except Exception:
+                            log.exception("取消时等待下载线程结束失败")
+                            break
+                    raise
+            except Exception:
+                log.exception("下载或 PDF 合成失败")
+                self.last_result = {"status": "error", "message": "下载或 PDF 合成失败，未发送文件；可检查网络后重试。"}
+                await self._reply(target, generation, "下载或 PDF 合成失败，未发送文件；请查看 jm-bot 日志。")
+                return
+
+            retain_pdf = True
+            self.last_result = {"status": "retained", "message": "PDF 已生成；若连接中断或发送结果不明，将保留文件。",
+                                "path": f"downloads/{job.name}/{pdf.name}"}
+            if not self._available(generation):
+                self.last_result["message"] = "任务期间连接中断，未自动补发；请从 NAS 取回 PDF。"
+                log.warning("连接已变化，不自动上传；PDF 保留于 %s", pdf)
+                return
+            try:
+                self.current_task["stage"] = "发送 PDF"
+                action = "upload_group_file" if group else "upload_private_file"
+                await self.client.call(action, **target, file=str(pdf.resolve()), name=pdf.name, upload_file=True)
+            except Exception:
+                log.exception("上传结果未确认，PDF 保留于 %s", pdf)
+                self.last_result["message"] = "发送结果未确认；请先检查 QQ，避免重复发送。PDF 已保留。"
+                await self._reply(target, generation,
+                                  "PDF 发送结果未确认，请先检查 QQ，避免重复发送。\n"
+                                  f"PDF 已保留，NAS 文件（相对项目目录）：downloads/{job.name}/{pdf.name}")
+                return
+            retain_pdf = False
+            self.last_result = {"status": "success", "message": f"JM {album_id} PDF 已上传，临时文件已清理。"}
+            await self._reply(target, generation, "PDF 已上传。")
+        finally:
+            if job is not None:
+                try:
+                    await asyncio.to_thread(shutil.rmtree, job / "images" if retain_pdf else job)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    log.exception("临时文件清理失败：%s", job)
+                    if self.last_result is not None:
+                        self.last_result["message"] += " 临时文件清理失败，请从 NAS 检查残留文件。"
+                        if (job / f"jm_{album_id}.pdf").exists():
+                            self.last_result["path"] = f"downloads/{job.name}/jm_{album_id}.pdf"
+
+    async def send_test_file(self, kind: str, target_id: str, source: Path) -> dict:
+        target_id = positive_id(target_id)
+        if kind not in ("private", "group"):
+            raise ValueError("请选择群聊或私聊")
+        allowed = self.settings.allowed_groups if kind == "group" else self.settings.allowed_users
+        if target_id not in allowed:
+            raise ValueError("请先在使用权限中允许这个群或用户，并保存设置")
+        if self.busy:
+            raise ValueError("正在处理其他任务，请稍后重试")
+        if not self.client.connected:
+            raise ValueError("QQ 连接尚未就绪，请先查看概览中的提示")
+        async with self._lock:
+            self.current_task = {"album_id": "测试文件", "stage": "发送普通测试 PDF"}
+            job = None
+            acknowledged = False
+            try:
+                job = Path(tempfile.mkdtemp(prefix="test_", dir=self.data_dir))
+                job.chmod(0o755)
+                pdf = job / "jm_bot_test.pdf"
+                await asyncio.to_thread(shutil.copyfile, source, pdf)
+                pdf.chmod(0o644)
+                self.last_result = {"status": "retained", "message": "测试 PDF 发送中；若发送结果不明将保留文件。",
+                                    "path": f"downloads/{job.name}/{pdf.name}"}
+                try:
+                    await self.client.call("upload_group_file" if kind == "group" else "upload_private_file",
+                                           **{"group_id" if kind == "group" else "user_id": target_id},
+                                           file=str(pdf.resolve()), name=pdf.name, upload_file=True)
+                    acknowledged = True
+                    result = {"status": "success", "message": "测试 PDF 已上传，请在 QQ 中确认可以打开。"}
+                except Exception:
+                    result = {"status": "retained", "message": "发送结果未确认，请先检查 QQ，避免重复发送。",
+                              "path": f"downloads/{job.name}/{pdf.name}"}
+                self.last_result = result
+                return result
+            finally:
+                self.current_task = None
+                if job is not None and acknowledged:
                     try:
-                        await asyncio.to_thread(shutil.rmtree, job / "images" if retain_pdf else job)
-                    except FileNotFoundError:
-                        pass
+                        await asyncio.to_thread(shutil.rmtree, job)
                     except OSError:
-                        log.exception("临时文件清理失败：%s", job)
+                        self.last_result["message"] += " 临时文件清理失败，请在 NAS 检查残留。"
+                        if pdf.exists():
+                            self.last_result["path"] = f"downloads/{job.name}/{pdf.name}"
 
     async def close(self) -> None:
         self._closing = True

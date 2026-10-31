@@ -1,15 +1,33 @@
 import argparse
 import asyncio
 import logging
+import os
+from pathlib import Path
 import signal
+
+import aiohttp
+from aiohttp import web
 
 from . import __version__
 from .bot import JMBot
 from .config import Settings
+from .napcat import NapCat
+from .store import StateStore
+from .web import Runtime, create_app
 
 
-async def serve(settings: Settings) -> None:
-    bot = JMBot(settings)
+async def serve() -> None:
+    password = os.environ.get("ADMIN_PASSWORD", "")
+    if len(password) < 12 or password.startswith("REPLACE_") or "\n" in password or "\r" in password:
+        raise ValueError("请在 Compose 中填写自己的 ADMIN_PASSWORD（至少 12 位），然后重新创建容器")
+    store = StateStore(Path(os.environ.get("DATA_DIR", "/data")))
+    config_dir = Path(os.environ.get("NAPCAT_CONFIG_DIR", "/napcat-config"))
+    store.prepare_napcat(config_dir)
+    acl = store.get_permissions()
+    settings = Settings(ws_url=os.environ.get("ONEBOT_WS_URL", "ws://napcat:3001/"),
+                        token=store.state["onebot_token"], allowed_users=frozenset(acl["allowed_users"]),
+                        allowed_groups=frozenset(acl["allowed_groups"]), group_allow_all=acl["group_allow_all"],
+                        download_dir=Path(os.environ.get("DOWNLOAD_DIR", "/downloads")).resolve())
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGINT, signal.SIGTERM):
@@ -17,31 +35,31 @@ async def serve(settings: Settings) -> None:
             loop.add_signal_handler(signum, stop.set)
         except NotImplementedError:
             pass  # Windows uses asyncio.run's KeyboardInterrupt handling.
-    connection = asyncio.create_task(bot.client.run())
-    stopping = asyncio.create_task(stop.wait())
-    logging.info("JM-Bot %s 启动；等待 NapCat 连接，用户白名单 %d 项、群白名单 %d 项",
-                 __version__, len(settings.allowed_users), len(settings.allowed_groups))
-    try:
-        await asyncio.wait((connection, stopping), return_when=asyncio.FIRST_COMPLETED)
-        if connection.done():
-            await connection
-    finally:
-        stopping.cancel()
-        await bot.close()
-        await asyncio.gather(connection, stopping, return_exceptions=True)
+    async with aiohttp.ClientSession(trust_env=False) as session:
+        napcat = NapCat(session, os.environ.get("NAPCAT_URL", "http://napcat:6099"),
+                        store.state["napcat_token"], store.state["onebot_token"], config_dir)
+        app = create_app(Runtime(store, JMBot(settings), napcat), password,
+                         Path(__file__).resolve().parent.parent / "samples" / "test.pdf")
+        runner = web.AppRunner(app, access_log=None)
+        await runner.setup()
+        try:
+            await web.TCPSite(runner, os.environ.get("WEB_HOST", "0.0.0.0"),
+                              int(os.environ.get("WEB_PORT", "8080"))).start()
+            logging.info("JM-Bot %s 管理网页已启动；打开 http://NAS地址:16099（端口以 Compose 为准）", __version__)
+            await stop.wait()
+        finally:
+            await runner.cleanup()
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="JM-Bot：仅通过 NapCat 处理 /jm <ID>。配置来自 Compose 环境变量。")
+    parser = argparse.ArgumentParser(description="JM-Bot：一个管理密码，在网页扫码并配置权限。")
     parser.add_argument("--version", action="version", version=__version__)
     parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     try:
-        settings = Settings.from_env()
-    except ValueError as exc:
+        asyncio.run(serve())
+    except (ValueError, OSError) as exc:
         parser.error(str(exc))
-    try:
-        asyncio.run(serve(settings))
     except KeyboardInterrupt:
         pass
 

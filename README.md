@@ -1,173 +1,153 @@
 # JM-Bot
 
-只接收 `/jm <本子ID>` 的 QQ 机器人：下载全部章节、确认完整后合成 PDF，发回当前私聊或群聊。独立 Python 服务 + NapCat（连接 QQ 的程序），没有 AstrBot、模型配置或插件安装。
+QQ 中发送 `/jm <本子ID>`，机器人下载全部章节、确认完整后合成 PDF，并发回当前会话。使用独立 QQ 小号和两个容器，保留 NAS 上原有 AstrBot。
 
-> **1.0.1 已公开并通过匿名拉取验证。** 此版本增加“指定群内所有成员可用”，并细分口令启动错误；41 项测试、Linux 镜像构建和容器检查通过。[验证记录](docs/verification.md)。真实 QQ 收发、NAS 权限和站点下载仍需现场验收。
+**1.1.0-rc.1 是统一管理页的候选版本。** 新版只需在 Compose 填一个管理密码，随后在同一个网页完成 QQ 扫码、选群、保存权限和测试 PDF。内部连接口令由程序生成，无需手填。候选版的检查和发布状态见[验证记录](docs/verification.md)；完成 NAS、真实 QQ 收发及下载验收前不标为稳定版。
 
-## 1. 填配置并部署
+## 1. 在 UGOS 部署
 
-Compose 是一次管理两个容器的配置。容器使用已经打包好依赖的镜像；NAS 只需粘贴配置，不用上传源码、安装 Python/pip 或编译。
+NAS 只运行已经打包好依赖的镜像，不需要安装 Python、pip、插件或上传源码。镜像必须已发布并通过匿名拉取验证；候选镜像尚未发布时，等待发布后再部署。
 
-1. 准备 QQ 小号，用主号添加它为好友；需要群聊时，把小号加进目标群。
-2. 在 UGOS 的 Docker 应用创建独立项目 `jm-bot`，选择独立项目目录。确认 NAS 端口 `16099` 没被其他服务占用，有冲突只改下面 `16099:6099` 的左侧数字。
-3. 在项目目录预建 `napcat-config`、`qq-data`、`downloads` 三个文件夹。
-4. 复制下列完整配置。自行生成两段不同的随机口令（建议密码管理器生成 32 位字母数字）：分别替换 `ONEBOT_TOKEN`、`WEBUI_TOKEN`。前者用于两个程序之间的连接，后者用于 NapCat 网页登录。口令不要公开或提交到 GitHub。
-5. 本示例启用 `GROUP_ALLOW_ALL: "true"`，将 `ALLOWED_GROUPS` 填为目标群的实际群号，即允许该群所有成员使用，无需逐个填 QQ 号。空群名单仍禁止所有群。`ALLOWED_USERS` 控制私聊，暂时留空即可禁止私聊。
-6. 粘贴到项目的 Compose 配置区并部署，检查两个容器日志。
+1. 准备新 QQ 小号，用主号添加它为好友；需要群聊时，把小号加入目标群。
+2. 在 UGOS 的 Docker 应用创建独立项目 `jm-bot`，选择独立项目目录。确认 NAS 端口 **16099** 空闲，有冲突只改配置中 `16099:8080` 的左侧数字。
+3. 在项目目录预建 `data`、`napcat-config`、`qq-data`、`downloads` 四个文件夹。
+4. 复制以下配置，只把 `ADMIN_PASSWORD` 的占位符换成自己的管理密码：**至少 12 个字符，建议使用密码管理器生成的随机英文字母和数字**。妥善保存，不要把含真实密码的 Compose 提交到 GitHub。使用字母数字也能避免 `$` 被 Compose 当作变量替换。
+5. 粘贴到项目的 Compose 配置区并部署，查看两个容器日志。
 
 ```yaml
 name: jm-bot
 
 services:
   jm-bot:
-    image: ghcr.io/epiphany-leave/jm-bot:1.0.1
+    image: ghcr.io/epiphany-leave/jm-bot:1.1.0-rc.1
     platform: linux/amd64
     restart: unless-stopped
-    depends_on:
-      - napcat
     environment:
       TZ: Asia/Shanghai
-      ONEBOT_WS_URL: ws://napcat:3001/
-      ONEBOT_TOKEN: "REPLACE_WITH_YOUR_ONEBOT_TOKEN"
-      GROUP_ALLOW_ALL: "true"
-      ALLOWED_USERS: ""
-      ALLOWED_GROUPS: ""
-      DOWNLOAD_DIR: /downloads
+      ADMIN_PASSWORD: "REPLACE_WITH_YOUR_ADMIN_PASSWORD"
+    ports:
+      - "16099:8080"
     volumes:
+      - ./data:/data
+      - ./napcat-config:/napcat-config
       - ./downloads:/downloads
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   napcat:
     image: mlikiowa/napcat-docker:v4.18.42
     restart: unless-stopped
+    depends_on:
+      jm-bot:
+        condition: service_healthy
     environment:
       TZ: Asia/Shanghai
       MODE: ws
       NAPCAT_UID: "1000"
       NAPCAT_GID: "1000"
-      WEBUI_TOKEN: "REPLACE_WITH_YOUR_WEBUI_TOKEN"
-    ports:
-      - "16099:6099"
     volumes:
       - ./napcat-config:/app/napcat/config
       - ./qq-data:/app/.config/QQ
       - ./downloads:/downloads:ro
 ```
 
-本版面向 x86-64 NAS（镜像平台 `linux/amd64`）。只有 NapCat 网页端口映射到 NAS；不要额外开放 `3001`。两个容器通过项目自己的内部网络通信，`napcat` 是服务名。`./` 指项目目录，不要复用其他机器人的数据目录。UGOS 按钮可能随系统版本变化，参见[官方 Compose 指南](https://support.ugnas.com/detail/article/zh-CN/411)。
+只有 JM-Bot 的管理页端口映射到 NAS。NapCat 的 `6099`、OneBot 的 `3001` 只在项目内部使用，无需额外开放。JM-Bot 先准备内部连接配置并启动管理页，NapCat 在该页面健康后启动；QQ 尚未登录不会阻止管理页打开。
 
-### 群聊全员模式与以后收紧权限
+本版面向 x86-64 NAS，镜像平台是 `linux/amd64`。`./` 指所选的项目目录，两个容器共用项目自己的网络，服务名不与其他项目冲突。UGOS 按钮名称可能随系统版本变化，参见[官方 Compose 指南](https://support.ugnas.com/detail/article/zh-CN/411)。
 
-例如目标群号为 `987654321`（请替换为自己的实际群号）：
+## 2. 在一个网页完成设置
 
-```yaml
-GROUP_ALLOW_ALL: "true"
-ALLOWED_GROUPS: "987654321"
-ALLOWED_USERS: ""
-```
+1. 打开 `http://NAS的局域网IP:16099/`，使用 Compose 中的 `ADMIN_PASSWORD` 登录。新版地址是根路径，不是旧的 `/webui`。管理页保留局域网访问即可。
+2. 在 QQ 登录区域显示并扫描二维码，使用新小号完成手机确认；二维码过期时刷新。确认页面显示的 QQ 号正确且在线。
+3. 刷新群列表，勾选允许使用机器人的群，保存权限。拉机器人入群不会自动授权，勾选并保存后才生效。
+4. 默认使用“指定群内所有成员可用”。需要逐人限制时，在页面关闭群全员模式，并填写允许的用户 QQ 号。私聊始终检查用户白名单；未填写用户时禁止私聊。没有选中的群时，所有群都禁止下载。
+5. 选择已授权的群，在页面发送普通测试 PDF。需要私聊时，先保存对应用户白名单，再向该用户发送测试 PDF。这一步不访问漫画站点，成功后在 QQ 打开文件。
+6. 在已授权会话中发送 `/jm`，应收到用法提示，然后按下一节测试真实下载。
 
-该群内任何成员都可发送 `/jm`；其他群、私聊仍不能使用。拉机器人入群不会自动把群号写入名单。多个群号用英文逗号分隔。需要私聊时，在 `ALLOWED_USERS` 填主号，例如 `"123456789"`。
+管理密码从 Compose 读取，页面不提供改密码入口。需要修改时，在 Compose 更新 `ADMIN_PASSWORD` 并重新创建 JM-Bot 容器，再用新密码登录；普通重启不会更新容器环境变量。不要手填内部 token 或修改 NapCat 网络配置。
 
-以后要限制群内调用者，将 `GROUP_ALLOW_ALL` 改为 `"false"`，并在 `ALLOWED_USERS` 中填写允许的用户 QQ 号；群号保留在 `ALLOWED_GROUPS` 中，此时群聊同时检查两份名单。程序未设置 `GROUP_ALLOW_ALL` 时默认也是 `false`，兼容 1.0.0 的权限规则。修改后重新创建 `jm-bot` 容器，使环境变量生效。
+## 3. 验证下载与权限
 
-## 2. 扫码登录 QQ
-
-打开 `http://NAS的局域网IP:16099/webui`，用刚填的 `WEBUI_TOKEN` 登录 NapCat，按页面扫码登录小号。核对显示的账号并确认在线。管理网页保留局域网访问即可。
-
-`WEBUI_TOKEN` 只在缺少网页配置文件时初始化口令；已有 `napcat-config/webui.json` 时，应在网页修改口令，修改 Compose 不会覆盖旧配置。[NapCat Docker 启动逻辑](https://github.com/NapNeko/NapCat-Docker/blob/main/entrypoint.sh)。
-
-## 3. 配置一次连接口令
-
-OneBot 是两个程序交换 QQ 消息和上传请求的接口；WebSocket（简称 WS）是保持连接的方式。本项目由 JM-Bot 主动连接 NapCat 的 WS 服务。
-
-1. NapCat 网页进入 **网络配置**，编辑已有 **WebSocket 服务器/服务端**；没有时新建一个，避免重复启用同端口服务。
-2. 启用服务，监听地址填 `0.0.0.0`、端口填 `3001`，token（连接口令）填 Compose 中的 `ONEBOT_TOKEN`，保存并按页面提示重启连接配置。
-3. JM-Bot 的连接地址保持 `ws://napcat:3001/`。不要填 NAS IP、`localhost`，也不要选择反向 WS 客户端。
-4. 查看 `jm-bot` 容器日志确认已连接。在已配置的目标群内发 `/jm`，应收到用法提示；这一步不下载内容。全员模式下，群内无需逐人登记；群外仍不能触发下载。私聊仅对 `ALLOWED_USERS` 中的用户开放。
-
-`MODE=ws` 只初始化缺失的 OneBot 配置，**不会把 Compose 的 `ONEBOT_TOKEN` 自动填进 NapCat**，所以首次仍需上述一次网页操作。初次部署时连接失败并重试属于待配置状态；保存正确 token 后应恢复。[官方 WS 示例](https://github.com/NapNeko/NapCat-Docker/blob/main/compose/ws.yml)。
-
-## 4. 先用普通 PDF 检查上传
-
-这一步不下载漫画，先验证共享目录与 QQ 文件通道。
-
-1. 从仓库下载普通的 [test.pdf](samples/test.pdf)，用 UGOS 文件管理放到项目目录 `downloads/test.pdf`。不需要上传源码或插件。
-2. NapCat 网页打开 **调试 → HTTP 调试**（网页自带接口测试页，无需增加 HTTP 服务或开放端口），选 `upload_private_file`。
-3. 将示例 `user_id` 换成已加好友的主 QQ 号，发送一次：
-
-   ```json
-   {"user_id": 123456789, "file": "/downloads/test.pdf", "name": "test.pdf", "upload_file": true}
-   ```
-
-4. 检查接口成功，并在主 QQ 打开 PDF。需要群聊时，再选 `upload_group_file`，用 `group_id` 替换 `user_id` 并填写目标群号。
-5. 成功后手动删除 `downloads/test.pdf`。网页调试不经过机器人的白名单，测试对象需自行核对。
-
-两个容器读取的同一文件路径都是 `/downloads/test.pdf`；NapCat 的只读挂载允许读取上传。[NapCat 文件上传实现](https://github.com/NapNeko/NapCatQQ/blob/v4.18.42/packages/napcat-onebot/action/go-cqhttp/UploadPrivateFile.ts)。
-
-## 5. 测试真实下载
-
-用自己有权访问的有效 ID 发送 `/jm <ID>`，不要把尖括号一起发出。例如 `/jm 11451` 仅展示格式，不保证这个 ID 可下载。
+用自己有权访问的有效 ID 发送 `/jm <ID>`，不要把尖括号一起发出。`/jm 11451` 仅展示格式，不保证这个 ID 可下载。
 
 | 场景 | 预期 |
 | --- | --- |
-| 白名单用户私聊 | 下载全部章节，完整后返回 `jm_<ID>.pdf` |
-| 全员模式下，任意成员在白名单群 | PDF 发到当前群 |
-| 关闭全员模式，白名单用户在白名单群 | PDF 发到当前群 |
-| 群不在名单，或逐人模式下用户不在名单 | 不开始下载 |
+| 群全员模式下，成员在已选群使用 | 完整下载后把 `jm_<ID>.pdf` 发到当前群 |
+| 关闭群全员模式 | 群号和调用者 QQ 号都必须已授权 |
+| 白名单用户私聊 | PDF 发回该用户 |
+| 未选中的群、未授权私聊用户 | 不开始下载 |
 | 空 ID、非数字、零、多个 ID | 回复用法，不开始下载 |
-| 正在下载、合成或上传时又调用 | 回复忙碌，不排队 |
-| 缺页、下载失败或合成失败 | 报错，不发送不完整 PDF |
+| 正在下载、合成或上传时再次调用 | 回复忙碌，不排队 |
+| 缺页、下载或合成失败 | 报错，不发送不完整 PDF |
 | 上传收到成功确认 | 清理本次图片和 PDF |
-| 上传失败、超时或连接中断 | 保留本次文件，不自动重发 |
+| 上传失败、超时或连接中断 | 留存文件，不自动重发 |
 
-打开收到的 PDF 检查页数、章节和页序。网络请求有超时和有限重试，整项任务没有强制时间限制。单任务运行，暂不提供取消、队列、搜索、批量或续传。重启会中断在途任务，不会自动恢复或重发。
+收到 PDF 后检查它能打开、章节及页码顺序正确、页数完整。网络请求有超时和有限重试，整项任务没有强制时间限制。重启会中断在途任务，不自动续传或重发；请等任务结束再更新、重建或修改相关配置。
 
-## 排查、取回与恢复
+## 升级、备份与恢复
+
+从 1.0.x 升级到统一管理页时：
+
+1. 在 UGOS 停止旧的 **JM-Bot 项目**，释放它占用的 `16099`；不要停止或修改原有 AstrBot 项目。
+2. 用文件管理备份旧 Compose，以及项目里的 `napcat-config`、`qq-data`、`downloads`。这些备份可能包含账号登录状态和连接口令，保存在自己的 NAS 中。
+3. 在同一项目目录新增 `data` 文件夹。将 Compose **完整替换**为新版并填写 `ADMIN_PASSWORD`，保留原来的三个数据目录；不要把旧 `ONEBOT_TOKEN`、`WEBUI_TOKEN`、群号环境变量继续粘入新版。
+4. 重新创建项目容器，打开统一管理页，核对账号、重新选择允许的群和用户，再做普通 PDF、权限与下载验收。新版 Compose 不继承旧容器中的白名单，请在网页重新确认并保存。
 
 | 项目目录内文件夹 | 用途 |
 | --- | --- |
-| `napcat-config/` | NapCat 网页及 OneBot 连接配置 |
+| `data/` | 网页保存的权限及程序生成的内部连接配置 |
+| `napcat-config/` | NapCat 配置，两个容器共用 |
 | `qq-data/` | 小号登录状态 |
 | `downloads/` | 任务图片、PDF；失败或上传未确认时留存 |
 
-失败后按回复或 `jm-bot` 日志里的路径，在 UGOS 文件管理进入 `downloads/` 对应任务目录取回 PDF。断线时可能收不到错误回复，应检查日志和任务文件。先在 QQ 确认文件是否已经到达，再考虑手动重新执行，避免重复上传。留存文件不定时清除，取回后自行删除。
+网页中的保存操作会写入持久化目录，重建容器时继续挂载这四个文件夹。不要手改 `data/config.json`，也不要把它上传到公开仓库或作为排查附件公开。
 
-UID/GID 是 Linux 识别用户/用户组的数字。NapCat 默认用 `1000:1000` 运行；`napcat-config`、`qq-data` 要可写，`downloads` 及其父目录要可遍历，PDF 要可读。JM-Bot 以容器内 root 写文件，任务目录权限为 `0755`、PDF 为 `0644`，让 NapCat 能读。NAS 的 ACL（文件夹访问规则）仍可能额外限制访问，必须用第 4 步实测。不要直接套用别人截图中的用户组 `10`，也不要盲目修改其他项目权限。
+失败后按回复或日志里的路径，在 UGOS 文件管理的 `downloads/` 对应任务目录取回 PDF。断线时可能收不到错误回复，应查看日志和任务文件。先在 QQ 确认文件是否已经到达，再考虑手动重新执行；留存文件取回后自行删除，不定时清除。
 
-| 现象 | 检查 |
+回退时停止本次 JM-Bot 项目，保留四个目录；需要恢复旧版时使用事先备份的 Compose 与配置。删除项目或容器时不要勾选删除 NAS 数据。
+
+## 排查
+
+| 现象 | 先检查 |
 | --- | --- |
-| 镜像拉取 denied/not found | 发布是否完成、GHCR 包是否公开、版本是否存在；不要因此在 NAS 安装 pip |
-| 启动报 ONEBOT_TOKEN 未设置/占位符/换行 | 检查 `jm-bot → environment → ONEBOT_TOKEN`，填写实际单行口令；保存 Compose 后重新创建容器，普通重启沿用旧环境变量。该错误发生在连接 NapCat 前，无需发送口令给他人排查 |
-| NapCat 网页打不开 | 两容器运行状态、NAS IP、端口冲突和 NapCat 日志 |
-| 401、鉴权失败、一直重连 | WS 服务端已启用，监听 `0.0.0.0:3001`，两端 token 完全一致 |
-| `/jm` 无回复 | 小号在线、JM-Bot 连接成功、指令发给正确账号、用户/群白名单 |
-| permission denied、PDF 上传失败 | 先做普通 PDF 测试，再核对相同挂载路径、目录权限与 QQ 返回错误 |
-| 站点下载失败 | `jm-bot` 日志、容器联网、上游站点可用性与磁盘空间 |
+| 镜像拉取 denied/not found | 候选版本是否已发布、GHCR 包是否公开、NAS 能否联网拉取 |
+| 管理页打不开 | 访问根路径、端口冲突、JM-Bot 容器健康状态和日志 |
+| ADMIN_PASSWORD 启动错误 | 替换占位符、至少 12 字符、保存 Compose 后重新创建容器 |
+| 登录失败 | 使用 Compose 中的管理密码，旧 NapCat 网页密码不用于新版入口 |
+| 网页已打开但 QQ 离线 | 等待 NapCat 启动，检查其日志，再刷新二维码并确认手机登录 |
+| 群列表没有目标群 | 确认小号已入群、账号在线，然后刷新列表 |
+| `/jm` 无回复 | 指令发给正确账号、页面在线状态、群选择及用户权限已保存 |
+| PDF 发送失败 | 先用页面的普通 PDF 测试，再检查目录权限和 QQ 返回错误 |
+| 下载失败 | JM-Bot 日志、容器联网、上游站点和磁盘空间 |
 
-改白名单或连接配置后，在 UGOS 应用 Compose 配置并重建 `jm-bot` 容器；普通重启不会载入新的环境变量。操作前等当前任务完成。
+NapCat 按 UID/GID `1000:1000` 运行。`napcat-config`、`qq-data` 要可写，`downloads` 和父目录要可遍历、PDF 要可读。JM-Bot 创建的任务目录为 `0755`、PDF 为 `0644`；NAS 的文件夹 ACL 仍可能额外限制访问，必须实际发送测试 PDF。不要直接套用别人截图中的用户组 `10`，或盲目修改其他项目的权限。
 
-恢复时先停止本次 `jm-bot` 项目；如有本次失败的残留容器，只删除这个项目的容器并**保留三个挂载目录**，不要改 NAS 上其他 AstrBot 项目。用同一目录重新部署后，依赖已在镜像中，不需要重新安装；核对 QQ 登录、WS 连接，重做普通 PDF 与真实下载测试。删除容器时不要勾选删除 NAS 数据。原 AstrBot 插件数据不自动迁移。
+## 开发与发布
 
-## 开发、发布与验收记录
-
-开发机使用 Python 3.12；下列容器检查需要 Linux 和本地 Docker（CI 也使用这个环境），运行：
+开发机使用 Python 3.12。浏览器检查只在开发和 CI 安装 Playwright，不进入运行镜像：
 
 ```text
 python -m pip install -r requirements.txt
 python -m unittest discover -s tests -v
+python -m pip install playwright==1.64.1
+python -m playwright install chromium
+python scripts/webui_browser.py
+python scripts/package.py
+```
+
+Linux 与本地 Docker 环境下检查成品镜像：
+
+```text
 docker build --platform linux/amd64 -t jm-bot:ci .
 python scripts/container_smoke.py --image jm-bot:ci
 ```
 
-测试使用本机替身模拟 OneBot，不登录真实 QQ。容器启动检查记录镜像大小和闲置 RSS（进程实际占用的物理内存），这些数字不等于下载期间峰值或整个 NapCat + QQ 的内存。
+自动测试使用本机 NapCat/OneBot 替身，不登录真实 QQ、不访问漫画站点。成品容器检查在没有 NapCat 的情况下验证网页健康、静态资源、认证、权限保存及重建恢复，另检查 UID1000 只读文件访问并记录镜像大小和空闲内存。空闲数据不代表下载峰值，也不包括 NapCat/QQ。
 
-[GitHub Actions](https://github.com/Epiphany-Leave/jm-bot/actions) 是仓库的自动测试与构建页面。推送 `main` 或手动运行会测试并构建 `linux/amd64` 镜像；推送 `v1.0.1` 标签才发布 `ghcr.io/epiphany-leave/jm-bot:1.0.1`。工作流先通过测试、容器导入与离线启动检查，再用 GitHub 自动提供的 `GITHUB_TOKEN` 和 `packages: write` 权限发布，无需另配个人访问口令。
+[GitHub Actions](https://github.com/Epiphany-Leave/jm-bot/actions) 在 `main` 推送和手动运行时测试构建；版本标签可发布 `v1.1.0-rc.1` 这样的候选版。发布后还会在未登录 GHCR 的环境匿名拉取并检查成品镜像。仓库公开不等于镜像包公开；匿名拉取成功后才能宣布可直接部署。[GitHub 镜像权限说明](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
 
-首次发布的 GHCR（GitHub 镜像仓库）包默认私有。维护者必须在 GitHub 个人主页 **Packages → jm-bot → Package settings → Change visibility** 设为 Public，然后在没有 GHCR 登录凭据的环境运行：
-
-```text
-docker pull --platform linux/amd64 ghcr.io/epiphany-leave/jm-bot:1.0.1
-```
-
-标签工作流中的 `verify-published` 会用全新、未登录的 Docker 配置拉取成品镜像，再验证实际容器。如果首次因包仍为私有而失败，设为 Public 后重新运行这个失败任务即可。记录成功摘要后才能把本文顶部状态改成“已公开并匿名拉取验证”。仓库公开不代表镜像也公开。[GitHub 镜像仓库权限说明](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
-
-当前验收状态：1.0.1 本地及 Linux 41 项测试、镜像构建、GHCR 匿名拉取、容器启动、共享目录只读权限及重建保留文件检查通过。[完整证据与数据口径](docs/verification.md)。NAS 目录权限、QQ 私聊/群文件、真实下载、NAS 重建恢复待现场验收。设计取舍见 [独立服务决策](docs/decisions-standalone.md)。
+源代码包和部署包只包含公开代码、示例配置及普通测试 PDF，不包含 NAS 运行数据。设计取舍见[独立服务决策](docs/decisions-standalone.md)，各版本证据见[验证记录](docs/verification.md)。

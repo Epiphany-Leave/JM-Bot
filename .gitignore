@@ -6,5 +6,6 @@ astrbot-data/
 napcat-config/
 qq-data/
 downloads/
+data/
 .env
 dist/
