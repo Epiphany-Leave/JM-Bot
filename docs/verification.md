@@ -11,7 +11,18 @@
 - Compose 的单入口、单密码、健康依赖及 README 示例一致性检查通过；源码 ZIP 包含全部静态文件且排除运行数据，部署 ZIP 完整性检查通过。
 - Windows Python 3.12：`python -m unittest discover -s tests -q`，62 项通过。包含真实本地 HTTP/WebSocket、临时磁盘读写、原子保存失败、旧配置备份、权限热更新、后台下载响应、普通测试 PDF 的成功/拒绝/丢失回执及清理失败处理。
 - 真实 Edge 无头浏览器：`python scripts/webui_browser.py --channel msedge` 通过。完成登录、二维码显示/刷新、模拟手机确认后选群、保存权限、轮询不覆盖未保存输入、测试文件成功/保留、手机布局、会话恢复和退出；控制台错误 0。截图保存在 `.cache/webui-browser/`（仅本地或 CI artifact，不进入镜像/源码包）。QQ 服务由本地替身提供，未真实扫码登录。
-- Linux 构建、候选镜像发布与匿名拉取结果待本次 CI 实际运行补充；未记录前不视为通过。
+- Linux Python 3.12：62 项测试和真实 Chromium 网页流程通过。`linux/amd64` 成品镜像构建、依赖与测试 PDF 导入、离线网页健康、认证、权限持久化、UID1000 读取私有配置与 PDF、只读挂载和容器重建后口令/权限/文件保留检查通过。[构建检查](https://github.com/Epiphany-Leave/JM-Bot/actions/runs/41218805945)。
+- 候选镜像 `ghcr.io/epiphany-leave/jm-bot:1.1.0-rc.1` 已推送；使用空的 `DOCKER_CONFIG` 免登录拉取成功，并重新运行成品容器检查通过。[发布及匿名验证](https://github.com/Epiphany-Leave/JM-Bot/actions/runs/41218940636)。源码提交 `1fdbe16cd416c4057a45d4e39fdb4b0caa32580b`，标签 `v1.1.0-rc.1`，镜像摘要 `sha256:0f3951ee3aff2fcba947dfc274e6d26151a27ceb73c18bb079cbf1875fa84643`。
+
+匿名拉取后实际运行的候选镜像数据：
+
+| 项目 | 结果 |
+| --- | --- |
+| 镜像本地大小 | 244,925,098 字节（约 233.6 MiB） |
+| 空闲容器内存，docker stats | 44.39 MiB |
+| PID 1 空闲 RSS | 69,348 KiB（约 67.7 MiB） |
+
+测量只包含 JM-Bot，不包含 NapCat/QQ，也不代表下载峰值或镜像网络下载量。新代码的编译与打包、Windows/ Linux 模拟验收均不能替代下面的真实 NAS 验收。
 
 尚未验证：用户 NAS 权限、真实 QQ 登录、群选择、私聊/群文件、实际站点下载和 NAS 重建恢复。上述完成前仅为候选版，不标记稳定版。
 
