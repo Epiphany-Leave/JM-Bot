@@ -17,6 +17,21 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.ws_url, "ws://napcat:3001/")
         self.assertFalse(config.allowed_users)
         self.assertFalse(config.allowed_groups)
+        self.assertFalse(config.group_allow_all)
+
+    def test_group_all_members_mode_requires_an_explicit_boolean(self):
+        self.assertTrue(self.settings(GROUP_ALLOW_ALL="true").group_allow_all)
+        self.assertFalse(self.settings(GROUP_ALLOW_ALL="false").group_allow_all)
+        for value in ("", "yes", "0", "*", "wrong"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.settings(GROUP_ALLOW_ALL=value)
+
+    def test_token_error_identifies_cause_without_echoing_the_value(self):
+        for token, cause in (("", "为空"), ("REPLACE_WITH_YOUR_TOKEN", "占位符"), ("secret\nvalue", "换行")):
+            with self.subTest(cause=cause), self.assertRaisesRegex(ValueError, cause) as error:
+                self.settings(ONEBOT_TOKEN=token)
+            if token:
+                self.assertNotIn(token, str(error.exception))
 
     def test_normalizes_ids_and_resolves_output_path(self):
         with tempfile.TemporaryDirectory() as folder:

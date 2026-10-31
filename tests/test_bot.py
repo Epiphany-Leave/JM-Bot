@@ -76,9 +76,33 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         await self.bot.close()
         self.directory.cleanup()
 
-    def new_bot(self, users=frozenset({"10001"}), groups=frozenset({"20001"})):
+    def new_bot(self, users=frozenset({"10001"}), groups=frozenset({"20001"}), group_all=False):
         return module.JMBot(Settings(token="test", allowed_users=users, allowed_groups=groups,
-                                     download_dir=self.root), self.client)
+                                     download_dir=self.root, group_allow_all=group_all), self.client)
+
+    async def test_all_members_of_allowed_group_can_download_without_user_list(self):
+        self.bot = self.new_bot(users=frozenset(), group_all=True)
+        for user in (10002, 10003):
+            await self.bot.handle(event(user=user, group=20001), 1)
+        self.assertEqual(len(self.uploads()), 2)
+        self.assertTrue(all(action == "upload_group_file" for action, _ in self.uploads()))
+
+    async def test_group_all_mode_never_opens_other_groups_or_private_messages(self):
+        self.bot = self.new_bot(users=frozenset(), group_all=True)
+        for user, group in ((10001, 20002), (10002, None)):
+            await self.bot.handle(event(user=user, group=group), 1)
+        self.assertFalse(self.uploads())
+        self.assertTrue(all("未授权" in text for text in self.messages()))
+        self.bot = self.new_bot(users=frozenset(), groups=frozenset(), group_all=True)
+        await self.bot.handle(event(group=20001), 1)
+        self.assertFalse(self.uploads())
+
+    async def test_group_all_mode_can_be_disabled_to_restore_user_restrictions(self):
+        self.bot = self.new_bot(group_all=False)
+        await self.bot.handle(event(user=10002, group=20001), 1)
+        self.assertFalse(self.uploads())
+        await self.bot.handle(event(user=10001, group=20001), 1)
+        self.assertEqual(len(self.uploads()), 1)
 
     def uploads(self):
         return [(action, params) for action, params in self.client.calls if action.startswith("upload_")]

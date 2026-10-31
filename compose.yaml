@@ -2,7 +2,7 @@ name: jm-bot
 
 services:
   jm-bot:
-    image: ghcr.io/epiphany-leave/jm-bot:1.0.0
+    image: ghcr.io/epiphany-leave/jm-bot:1.0.1
     platform: linux/amd64
     restart: unless-stopped
     depends_on:
@@ -11,7 +11,9 @@ services:
       TZ: Asia/Shanghai
       ONEBOT_WS_URL: ws://napcat:3001/
       ONEBOT_TOKEN: "REPLACE_WITH_YOUR_ONEBOT_TOKEN"
-      ALLOWED_USERS: "REPLACE_WITH_CALLER_QQ"
+      GROUP_ALLOW_ALL: "true"
+      # 私聊用户白名单；群全员模式无需逐个填写群成员。
+      ALLOWED_USERS: ""
       # 多个号码用英文逗号隔开；空字符串禁止所有群。
       ALLOWED_GROUPS: ""
       DOWNLOAD_DIR: /downloads

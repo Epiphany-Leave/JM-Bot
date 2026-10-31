@@ -95,7 +95,10 @@ class JMBot:
         if self._duplicate((self_id, kind, group or sender, str(message_id))):
             return
         target = {"group_id": group} if group else {"user_id": sender}
-        if sender not in self.settings.allowed_users or (group and group not in self.settings.allowed_groups):
+        authorized = sender in self.settings.allowed_users
+        if group:
+            authorized = group in self.settings.allowed_groups and (self.settings.group_allow_all or authorized)
+        if not authorized:
             await self._reply(target, generation, "未授权使用 /jm，请联系机器人管理员配置白名单。")
             return
         args = text.split()
