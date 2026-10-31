@@ -2,7 +2,7 @@
 
 只接收 `/jm <本子ID>` 的 QQ 机器人：下载全部章节、确认完整后合成 PDF，发回当前私聊或群聊。独立 Python 服务 + NapCat（连接 QQ 的程序），没有 AstrBot、模型配置或插件安装。
 
-> **1.0.1 发布验证中。** 此版本增加“指定群内所有成员可用”，并细分口令启动错误。1.0.0 已公开并验证；1.0.1 须通过构建和匿名拉取后才能按下文部署。[验证记录](docs/verification.md)。真实 QQ 收发、NAS 权限和站点下载仍需现场验收。
+> **1.0.1 已公开并通过匿名拉取验证。** 此版本增加“指定群内所有成员可用”，并细分口令启动错误；41 项测试、Linux 镜像构建和容器检查通过。[验证记录](docs/verification.md)。真实 QQ 收发、NAS 权限和站点下载仍需现场验收。
 
 ## 1. 填配置并部署
 
@@ -170,4 +170,4 @@ docker pull --platform linux/amd64 ghcr.io/epiphany-leave/jm-bot:1.0.1
 
 标签工作流中的 `verify-published` 会用全新、未登录的 Docker 配置拉取成品镜像，再验证实际容器。如果首次因包仍为私有而失败，设为 Public 后重新运行这个失败任务即可。记录成功摘要后才能把本文顶部状态改成“已公开并匿名拉取验证”。仓库公开不代表镜像也公开。[GitHub 镜像仓库权限说明](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
 
-当前验收状态：1.0.1 本地 41 项测试通过，待 Linux 构建和匿名拉取；1.0.0 的容器与匿名拉取检查已通过。[完整证据与数据口径](docs/verification.md)。NAS 目录权限、QQ 私聊/群文件、真实下载、NAS 重建恢复待现场验收。设计取舍见 [独立服务决策](docs/decisions-standalone.md)。
+当前验收状态：1.0.1 本地及 Linux 41 项测试、镜像构建、GHCR 匿名拉取、容器启动、共享目录只读权限及重建保留文件检查通过。[完整证据与数据口径](docs/verification.md)。NAS 目录权限、QQ 私聊/群文件、真实下载、NAS 重建恢复待现场验收。设计取舍见 [独立服务决策](docs/decisions-standalone.md)。
