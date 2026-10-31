@@ -2,7 +2,7 @@
 
 只接收 `/jm <本子ID>` 的 QQ 机器人：下载全部章节、确认完整后合成 PDF，发回当前私聊或群聊。独立 Python 服务 + NapCat（连接 QQ 的程序），没有 AstrBot、模型配置或插件安装。
 
-> **发布状态：未验证。** 目标镜像为 `ghcr.io/epiphany-leave/jm-bot:1.0.0`，目前不能声称已公开或可直接拉取。必须先完成文末的构建、发布、设为公开和匿名拉取验收，再使用下面的部署流程。真实 QQ 收发、NAS 权限和站点下载仍需现场验收。
+> **发布状态：已公开并通过匿名拉取验证。** `ghcr.io/epiphany-leave/jm-bot:1.0.0` 已在未登录 GHCR 的 Linux 环境成功拉取，并通过容器启动、消息收发、只读权限和重建保留文件检查。[验证记录](docs/verification.md)。真实 QQ 收发、NAS 权限和站点下载仍需现场验收。
 
 ## 1. 填配置并部署
 
@@ -153,4 +153,4 @@ docker pull --platform linux/amd64 ghcr.io/epiphany-leave/jm-bot:1.0.0
 
 标签工作流中的 `verify-published` 会用全新、未登录的 Docker 配置拉取成品镜像，再验证实际容器。如果首次因包仍为私有而失败，设为 Public 后重新运行这个失败任务即可。记录成功摘要后才能把本文顶部状态改成“已公开并匿名拉取验证”。仓库公开不代表镜像也公开。[GitHub 镜像仓库权限说明](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
 
-当前验收状态：发布/匿名拉取未验证；镜像大小/闲置 RSS 待构建检查记录；NAS 目录权限、QQ 私聊/群文件、真实下载、重建恢复待现场验收。设计取舍见 [独立服务决策](docs/decisions-standalone.md)。
+当前验收状态：源码已发布；36 项测试、Linux 镜像构建、GHCR 匿名拉取、容器启动、共享目录权限及容器重建检查通过。镜像本地大小约 220 MiB，下载程序空闲 RSS 约 50 MiB（不含 NapCat/QQ，不代表下载峰值）。[完整证据与数据口径](docs/verification.md)。NAS 目录权限、QQ 私聊/群文件、真实下载、NAS 重建恢复待现场验收。设计取舍见 [独立服务决策](docs/decisions-standalone.md)。

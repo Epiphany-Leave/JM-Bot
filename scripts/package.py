@@ -8,7 +8,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_FILES = (
     ".gitignore", ".dockerignore", "LICENSE", "Dockerfile", "requirements.txt", "compose.yaml", "README.md",
-    ".github/workflows/ci.yml", "docs/decisions-standalone.md", "samples/test.pdf",
+    ".github/workflows/ci.yml", "docs/decisions-standalone.md", "docs/verification.md", "samples/test.pdf",
     "jm_bot/__init__.py", "jm_bot/__main__.py", "jm_bot/config.py", "jm_bot/bot.py",
     "jm_bot/downloader.py", "jm_bot/onebot.py", "scripts/package.py", "scripts/container_smoke.py",
     "tests/__init__.py", "tests/test_bot.py", "tests/test_config.py",
