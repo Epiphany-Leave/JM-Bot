@@ -1,0 +1,10 @@
+.venv/
+.cache/
+__pycache__/
+*.py[cod]
+astrbot-data/
+napcat-config/
+qq-data/
+downloads/
+.env
+dist/

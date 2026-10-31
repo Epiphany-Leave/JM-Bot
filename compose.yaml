@@ -1,0 +1,36 @@
+name: jm-bot
+
+services:
+  jm-bot:
+    image: ghcr.io/epiphany-leave/jm-bot:1.0.0
+    platform: linux/amd64
+    restart: unless-stopped
+    depends_on:
+      - napcat
+    environment:
+      TZ: Asia/Shanghai
+      ONEBOT_WS_URL: ws://napcat:3001/
+      ONEBOT_TOKEN: "REPLACE_WITH_YOUR_ONEBOT_TOKEN"
+      ALLOWED_USERS: "REPLACE_WITH_CALLER_QQ"
+      # 多个号码用英文逗号隔开；空字符串禁止所有群。
+      ALLOWED_GROUPS: ""
+      DOWNLOAD_DIR: /downloads
+    volumes:
+      - ./downloads:/downloads
+
+  napcat:
+    image: mlikiowa/napcat-docker:v4.18.42
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      MODE: ws
+      NAPCAT_UID: "1000"
+      NAPCAT_GID: "1000"
+      # 自行生成，必须与 ONEBOT_TOKEN 使用不同口令。
+      WEBUI_TOKEN: "REPLACE_WITH_YOUR_WEBUI_TOKEN"
+    ports:
+      - "16099:6099"
+    volumes:
+      - ./napcat-config:/app/napcat/config
+      - ./qq-data:/app/.config/QQ
+      - ./downloads:/downloads:ro

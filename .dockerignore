@@ -1,0 +1,7 @@
+**
+!Dockerfile
+!requirements.txt
+!jm_bot/
+!jm_bot/**
+**/__pycache__/
+**/*.py[cod]
