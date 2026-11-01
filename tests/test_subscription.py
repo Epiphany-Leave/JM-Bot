@@ -16,6 +16,11 @@ class SubscriptionTests(unittest.IsolatedAsyncioTestCase):
     asyncTearDown = managed.ManagedProxyTests.asyncTearDown
 
     async def serve(self, request):
+        if request.path == '/providers/proxies/subscription' and self.ready_nodes_failure:
+            if self.ready_nodes_failure == 'timeout':
+                await asyncio.sleep(0.1)
+            else:
+                return web.Response(status=503)
         if request.path.startswith('/sub/'):
             self.requests.append((request.path, request.headers.get('User-Agent'),
                                   request.headers.get('Proxy-Authorization')))
@@ -49,6 +54,7 @@ class SubscriptionTests(unittest.IsolatedAsyncioTestCase):
         await managed.ManagedProxyTests.asyncSetUp(self)
         self.requests = []
         self.fail_fetch_proxy = False
+        self.ready_nodes_failure = None
 
     async def test_fixed_ua_environment_independence_and_native_formats(self):
         with patch.dict(os.environ, {'HTTP_PROXY': 'http://127.0.0.1:1',
@@ -115,6 +121,28 @@ class SubscriptionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(caught.exception.stage, 'subscription_proxy_ready')
         self.assertEqual(len(self.requests), 1)
         self.assertEqual(self.store.state['proxy'], previous)
+
+    async def test_failed_old_proxy_readiness_restores_manual_selection(self):
+        self.source += '- {name: beta, type: http, server: 127.0.0.1, port: 8081}\n'
+        await self.proxy.import_subscription(content=self.source)
+        await self.proxy.select_node('beta')
+        previous = dict(self.store.state['proxy'])
+        config = (self.root / 'config.yaml').read_bytes()
+        providers = set(self.root.glob('provider-*'))
+        timeout = asyncio.timeout
+        for failure in ('http', 'timeout'):
+            self.ready_nodes_failure = failure
+            with self.subTest(failure=failure):
+                with patch('jm_bot.proxy.asyncio.timeout', side_effect=lambda seconds: timeout(0.01 if seconds == 20 else seconds)):
+                    with self.assertRaises(ProxyError) as caught:
+                        await self.proxy.import_subscription(url=self.base + '/sub/fallback')
+                self.assertEqual(caught.exception.code, 'subscription_proxy_unavailable')
+                self.assertEqual(caught.exception.stage, 'subscription_proxy_ready')
+                self.assertEqual(self.selected, 'beta')
+                self.assertEqual(self.store.state['proxy'], previous)
+                self.assertEqual((self.root / 'config.yaml').read_bytes(), config)
+                self.assertEqual(set(self.root.glob('provider-*')), providers)
+        self.assertEqual(len(self.requests), 2)  # only one direct fetch per attempt
 
     async def test_real_connection_failure_tls_and_shortened_request_timeout(self):
         sock = socket.socket()

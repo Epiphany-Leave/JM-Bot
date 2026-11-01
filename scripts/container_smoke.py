@@ -204,24 +204,26 @@ async def smoke(image: str) -> None:
                 await docker("rm", "--force", name + "-reader")
             except (RuntimeError, FileNotFoundError):
                 pass
-            await docker(*compose_args, "down")
-            # Only these temporary mounts belong to this invocation.
             try:
-                await docker(
-                    "run", "--rm", "--name", name + "-cleanup", "--network", "none",
-                    "--user", "0:0", *mounts, "--entrypoint", "python", image, "-c",
-                    "from pathlib import Path; import shutil\n"
-                    "for folder in ('/data', '/napcat-config', '/downloads', '/proxy-data', '/qq-data'):\n"
-                    "    for path in Path(folder).iterdir():\n"
-                    "        if path.is_dir() and not path.is_symlink(): shutil.rmtree(path)\n"
-                    "        else: path.unlink()\n"
-                    "    Path(folder).chmod(0o755)\n",
-                )
+                await docker(*compose_args, "down")
             finally:
+                # Only these temporary mounts belong to this invocation.
                 try:
-                    await docker("rm", "--force", name + "-cleanup")
-                except (RuntimeError, FileNotFoundError):
-                    pass
+                    await docker(
+                        "run", "--rm", "--name", name + "-cleanup", "--network", "none",
+                        "--user", "0:0", *mounts, "--entrypoint", "python", image, "-c",
+                        "from pathlib import Path; import shutil\n"
+                        "for folder in ('/data', '/napcat-config', '/downloads', '/proxy-data', '/qq-data'):\n"
+                        "    for path in Path(folder).iterdir():\n"
+                        "        if path.is_dir() and not path.is_symlink(): shutil.rmtree(path)\n"
+                        "        else: path.unlink()\n"
+                        "    Path(folder).chmod(0o755)\n",
+                    )
+                finally:
+                    try:
+                        await docker("rm", "--force", name + "-cleanup")
+                    except (RuntimeError, FileNotFoundError):
+                        pass
 
 
 def main() -> None:

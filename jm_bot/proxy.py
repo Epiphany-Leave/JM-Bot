@@ -310,6 +310,11 @@ class ManagedProxy:
                         async with asyncio.timeout(20):
                             await self.ensure_ready()
                     except (ProxyError, TimeoutError):
+                        # Reapplying the saved config may reset the core's manual selection.
+                        try:
+                            await self._select(previous["node"])
+                        except ProxyError:
+                            pass
                         raise ProxyError("订阅直连失败，已有代理验证失败或超时", code="subscription_proxy_unavailable",
                                          stage=stage, next_step="请检查已有节点，或上传订阅文件。") from None
                     stage = "subscription_fetch_proxy"
