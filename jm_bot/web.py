@@ -129,7 +129,11 @@ def create_app(runtime: Runtime, password: str, test_pdf: Path, *, manage_runtim
     async def protection(request, handler):
         if request.method not in ("GET", "HEAD", "OPTIONS"):
             origin = request.headers.get("Origin")
-            if (origin and origin != f"{request.scheme}://{request.host}") or request.headers.get("Sec-Fetch-Site") == "cross-site":
+            allowed_origins = {f"{request.scheme}://{request.host}"}
+            if request.scheme == "http":
+                # A NAS gateway terminates TLS while preserving the external Host.
+                allowed_origins.add(f"https://{request.host}")
+            if (origin and origin not in allowed_origins) or request.headers.get("Sec-Fetch-Site") == "cross-site":
                 return web.json_response({"error": "请求来源不匹配，请直接打开管理网页重试"}, status=403)
             if request.content_type != "application/json":
                 return web.json_response({"error": "请使用管理网页提交设置"}, status=415)
@@ -186,7 +190,8 @@ def create_app(runtime: Runtime, password: str, test_pdf: Path, *, manage_runtim
         sessions[session] = now + 12 * 3600
         response = web.json_response({"ok": True})
         response.set_cookie("jm_session", session, httponly=True, samesite="Strict",
-                            secure=request.secure, max_age=12 * 3600)
+                            secure=request.secure or request.headers.get("Origin") == f"https://{request.host}",
+                            max_age=12 * 3600)
         return response
 
     async def logout(request):
@@ -245,9 +250,14 @@ def create_app(runtime: Runtime, password: str, test_pdf: Path, *, manage_runtim
     async def index(request):
         return web.FileResponse(STATIC / "index.html")
 
+    async def legacy_login(request):
+        raise web.HTTPFound("/")
+
     app.router.add_get("/healthz", health)
     app.router.add_get("/favicon.ico", favicon)
     app.router.add_get("/", index)
+    for path in ("/webui", "/webui/", "/webui/web_login"):
+        app.router.add_get(path, legacy_login)
     app.router.add_static("/static/", STATIC, show_index=False)
     app.router.add_post("/api/auth/login", login)
     app.router.add_get("/api/auth/session", session_status)

@@ -2,11 +2,11 @@
 
 QQ 中发送 `/jm <本子ID>`，机器人下载全部章节、确认完整后合成 PDF，并发回当前会话。使用独立 QQ 小号和两个容器，保留 NAS 上原有 AstrBot。
 
-**1.1.0-rc.1 已发布，并通过免登录拉取及 Linux 成品容器检查。** 新版只需在 Compose 填一个管理密码，随后在同一个网页完成 QQ 扫码、选群、保存权限和测试 PDF。内部连接口令由程序生成，无需手填。此版本仍为候选版，完成 NAS、真实 QQ 收发及下载验收前不标为稳定版。[发布检查](https://github.com/Epiphany-Leave/JM-Bot/actions/runs/41218940636)、[详细验证记录](docs/verification.md)。
+**统一管理页候选版 1.1.0-rc.2** 修复 HTTPS 外网入口转发到容器 HTTP 时登录误报 403，并让旧登录地址自动跳转到新入口。只需在 Compose 填一个管理密码，随后在同一个网页完成 QQ 扫码、选群、保存权限和测试 PDF。内部连接口令由程序生成，无需手填。发布及验收状态见[验证记录](docs/verification.md)；完成真实 NAS 验收前保持候选版本。
 
 ## 1. 在 UGOS 部署
 
-NAS 只运行已经打包好依赖的镜像，不需要安装 Python、pip、插件或上传源码。下面配置使用已验证的候选镜像 `ghcr.io/epiphany-leave/jm-bot:1.1.0-rc.1`。
+NAS 只运行已经打包好依赖的镜像，不需要安装 Python、pip、插件或上传源码。下面配置使用候选镜像 `ghcr.io/epiphany-leave/jm-bot:1.1.0-rc.2`，发布及免登录拉取通过后即可部署。
 
 1. 准备新 QQ 小号，用主号添加它为好友；需要群聊时，把小号加入目标群。
 2. 在 UGOS 的 Docker 应用创建独立项目 `jm-bot`，选择独立项目目录。确认 NAS 端口 **16099** 空闲，有冲突只改配置中 `16099:8080` 的左侧数字。
@@ -19,7 +19,7 @@ name: jm-bot
 
 services:
   jm-bot:
-    image: ghcr.io/epiphany-leave/jm-bot:1.1.0-rc.1
+    image: ghcr.io/epiphany-leave/jm-bot:1.1.0-rc.2
     platform: linux/amd64
     restart: unless-stopped
     environment:
@@ -70,6 +70,8 @@ services:
 
 管理密码从 Compose 读取，页面不提供改密码入口。需要修改时，在 Compose 更新 `ADMIN_PASSWORD` 并重新创建 JM-Bot 容器，再用新密码登录；普通重启不会更新容器环境变量。不要手填内部 token 或修改 NapCat 网络配置。
 
+通过 UGOS 的 HTTPS 外网地址访问时，先完成 UGOS 本身的登录，再打开应用地址的根路径 `/`，使用上述管理密码。不要使用 NapCat 日志中的 WebUI Token。网关应保留原始 Host（域名与端口）；程序不会盲目信任 `X-Forwarded-*` 请求头。
+
 ## 3. 验证下载与权限
 
 用自己有权访问的有效 ID 发送 `/jm <ID>`，不要把尖括号一起发出。`/jm 11451` 仅展示格式，不保证这个 ID 可下载。
@@ -89,6 +91,8 @@ services:
 收到 PDF 后检查它能打开、章节及页码顺序正确、页数完整。网络请求有超时和有限重试，整项任务没有强制时间限制。重启会中断在途任务，不自动续传或重发；请等任务结束再更新、重建或修改相关配置。
 
 ## 升级、备份与恢复
+
+已经使用 `1.1.0-rc.1` 时，只把 jm-bot 镜像改为 `ghcr.io/epiphany-leave/jm-bot:1.1.0-rc.2`，拉取并重新创建容器。管理密码、端口 `16099:8080` 和四个目录挂载继续保留。
 
 从 1.0.x 升级到统一管理页时：
 
@@ -118,6 +122,7 @@ services:
 | 管理页打不开 | 访问根路径、端口冲突、JM-Bot 容器健康状态和日志 |
 | ADMIN_PASSWORD 启动错误 | 替换占位符、至少 12 字符、保存 Compose 后重新创建容器 |
 | 登录失败 | 使用 Compose 中的管理密码，旧 NapCat 网页密码不用于新版入口 |
+| HTTPS 外网登录报 403 | 升级至 rc.2，完成 UGOS 登录后打开根路径；若仍报“请求来源不匹配”，先通过局域网 HTTP 根路径登录并检查网关是否保留 Host |
 | 网页已打开但 QQ 离线 | 等待 NapCat 启动，检查其日志，再刷新二维码并确认手机登录 |
 | 群列表没有目标群 | 确认小号已入群、账号在线，然后刷新列表 |
 | `/jm` 无回复 | 指令发给正确账号、页面在线状态、群选择及用户权限已保存 |

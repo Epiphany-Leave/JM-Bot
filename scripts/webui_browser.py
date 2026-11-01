@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT))
 
 from playwright.async_api import async_playwright, expect
 from tests.webui_fixture import PASSWORD, running_webui
+from tests.https_proxy import https_proxy
 
 
 async def main(channel=None):
@@ -83,6 +84,35 @@ async def main(channel=None):
                     assert not errors, "Browser errors: " + " | ".join(errors)
                     print("WebUI browser flow OK: login, QR, group permissions, unsaved edits, PDF ack/retention, mobile, session/logout; console errors=0")
                     print(f"Screenshots: {output}")
+                    async with https_proxy(url, Path(folder)) as proxy_url:
+                        context = await browser.new_context(ignore_https_errors=True)
+                        try:
+                            proxy_page = await context.new_page()
+                            proxy_errors = []
+                            proxy_page.on("pageerror", lambda error: proxy_errors.append(str(error)))
+                            proxy_page.on("console", lambda message: proxy_errors.append(message.text) if message.type == "error" else None)
+                            await proxy_page.goto(proxy_url + "/webui/web_login")
+                            assert proxy_page.url.split("#", 1)[0] == proxy_url + "/"
+                            await proxy_page.locator("#password").fill(PASSWORD)
+                            await proxy_page.get_by_role("button", name="登录管理台").click()
+                            await expect(proxy_page.locator("#app-view")).to_be_visible()
+                            cookie = next(cookie for cookie in await context.cookies() if cookie["name"] == "jm_session")
+                            assert cookie["secure"] and cookie["httpOnly"] and cookie["sameSite"] == "Strict"
+                            await proxy_page.locator('[data-tab="permissions"]').click()
+                            await expect(proxy_page.locator("#allowed-users")).to_have_value("10001")
+                            await proxy_page.locator("#allowed-users").fill("10001\n10002")
+                            await proxy_page.locator("#save-permissions").click()
+                            await expect(proxy_page.locator("#permissions-feedback")).to_contain_text("已生效")
+                            assert runtime.store.get_permissions()["allowed_users"] == ["10001", "10002"]
+                            await proxy_page.screenshot(path=output / "09-https-proxy.png", full_page=True)
+                            await proxy_page.reload()
+                            await expect(proxy_page.locator("#app-view")).to_be_visible()
+                            await proxy_page.locator("#logout").click()
+                            await expect(proxy_page.locator("#login-view")).to_be_visible()
+                            assert not proxy_errors, "HTTPS proxy browser errors: " + " | ".join(proxy_errors)
+                            print("HTTPS-to-HTTP proxy browser flow OK: legacy URL redirect, login, Secure cookie, permission save, reload/logout; console errors=0")
+                        finally:
+                            await context.close()
                 finally:
                     await browser.close()
 
