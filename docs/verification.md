@@ -7,6 +7,9 @@
 - 修复前用真实本地 HTTP 往返复现：HTTPS 来源登录返回 403，三个旧登录路径返回 404；原有跨站请求拒绝检查通过。
 - 修复后 Windows Python 3.12 共 66 项测试通过。同域名同端口的 HTTPS 转发登录、Secure/HttpOnly/SameSite Cookie、权限保存、会话和退出通过；不同域名、端口、无效来源、跨站请求和伪造转发头仍受限制。
 - 新增真实 TLS 终止代理浏览器场景：从 HTTPS 网页经 HTTP 后端登录，验证旧地址跳转、浏览器安全 Cookie、权限保存、刷新与退出。代理只在测试中运行，临时自签名证书不进入源码包或运行镜像。Linux 和镜像发布结果以完成后的 CI 记录为准。
+- Windows Edge 与 Linux Chromium 的普通 HTTP、真实 HTTPS 转发浏览器流程均通过，控制台错误 0。Windows 本地截图 `.cache/webui-browser/09-https-proxy.png`。
+- 候选镜像 `ghcr.io/epiphany-leave/jm-bot:1.1.0-rc.2` 已发布，Linux 66 项测试、构建、私有配置 UID1000 访问、只读文件权限、容器重建恢复和空 `DOCKER_CONFIG` 匿名拉取检查全部通过。[发布与匿名验证](https://github.com/Epiphany-Leave/JM-Bot/actions/runs/41275576332)。源码提交 `f1f25efc54d5fd91671dd83ad4e0196dc7b463e4`，镜像摘要 `sha256:4a231d55a15f9c3c13352370dc62a76bc5504012dd0746bf9cd523377cc06756`。
+- 匿名拉取后成品镜像本地大小 244,925,604 字节，空闲容器内存 43.8 MiB，PID1 RSS 69,000 KiB。只包含 JM-Bot，不含 NapCat/QQ 和下载峰值。
 - 尚未通过用户的 UGOS 外网网关实际登录验证；此前只读访问被网关重定向到 UGOS 登录页，没有取得用户会话或任何口令。
 
 ## 1.1.0-rc.1 候选版
