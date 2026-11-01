@@ -1,6 +1,6 @@
 # 独立 JM-Bot 的交付决策
 
-统一管理页让用户只填一个 `ADMIN_PASSWORD`，在同一网页完成 QQ、权限、文件测试和下载设置。rc.4 保留 rc.3 的下载控制与内置代理，改进跨平台部署、订阅获取和错误提示。部署目标是支持 Docker Linux 容器的 x86-64 主机；Linux 使用 Engine 与 Compose，Windows 推荐 Docker Desktop 的 WSL 2 后端。原有 AstrBot 可继续独立运行，无需为本项目在宿主机安装 Python、VPN GUI 或 Clash Verge。rc.4 在验证与发布完成前不宣称镜像已可用，旧版本检查不代替本版验收。
+统一管理页让用户只填一个 `ADMIN_PASSWORD`，在同一网页完成 QQ、权限、文件测试和下载设置。rc.4 保留 rc.3 的下载控制与内置代理，改进跨平台部署、订阅获取和错误提示。部署目标是支持 Docker Linux 容器的 x86-64 主机；Linux 使用 Engine 与 Compose，Windows 推荐 Docker Desktop 的 WSL 2 后端。原有 AstrBot 可继续独立运行，无需为本项目在宿主机安装 Python、VPN GUI 或 Clash Verge。rc.4 已发布并通过 Linux、真实 Mihomo、浏览器和匿名拉取检查；Windows Docker Desktop 及用户现场仍未实机验收，旧版本检查不代替本版验收。
 
 | 决策 | 原因与边界 |
 | --- | --- |

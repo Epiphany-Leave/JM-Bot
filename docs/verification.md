@@ -1,5 +1,18 @@
 # 验证记录
 
+## 1.1.0-rc.4 候选版
+
+日期：2026-11-01（Asia/Shanghai）。本版保留三个服务，修复订阅链接获取、旧入口响应缓存和版本识别，并将 README 改为 Linux / Windows 部署说明。
+
+- Windows Python 3.12：108 项测试通过。真实本机 HTTP 服务覆盖固定 Mihomo User-Agent、重定向、YAML / URI / Base64 获取、HTTP 状态码、HTML、UTF-8、2 MiB、连接 / TLS / DNS / 超时诊断；验证直连失败后通过已保存代理获取、两路失败保留旧配置，以及代理就绪失败后恢复手动节点。
+- 真实 Edge 浏览器：根路径、权限深链接、旧地址跳转、登录前后动态版本、订阅安全错误、文件导入、节点与下载设置、进度和停止、二维码、权限、普通 PDF、移动布局均通过。故意触发的订阅错误产生 1 条预期 HTTP 503 资源诊断，其他控制台错误和 JS 异常为 0；HTTPS 转发流程控制台错误为 0。截图 `.cache/webui-browser/01-login.png`、`09-https-proxy.png`、`15-subscription-safe-error.png`。
+- [最终 Linux CI](https://github.com/Epiphany-Leave/JM-Bot/actions/runs/41309801129) 通过 108 项测试、Chromium、真实 Mihomo 及成品镜像检查。Compose 检查从五个数据目录均不存在的临时项目开始，读取正式 Compose 挂载并验证自动创建、准备配置共享、UID1000 读取 PDF、重建保留权限 / 内部口令 / 文件。QQ 与代理服务在目录检查中使用受控文件检查进程；另行执行的 Mihomo 检查使用真实固定版本核心，不是真实 QQ 登录。
+- README 的 Compose 与仓库文件一致；新部署不要求手动创建五个目录，已有目录原地复用。
+- 候选镜像 `ghcr.io/epiphany-leave/jm-bot:1.1.0-rc.4` 已发布。独立任务使用空 `DOCKER_CONFIG` 匿名拉取成功，并重新通过 Compose 首次目录自动创建、认证、共享 PDF 读取及重建恢复。[发布与匿名验证](https://github.com/Epiphany-Leave/JM-Bot/actions/runs/41309991183)。源码提交 `2818ff137842d60240e7fbbd1bdf740e34812840`，标签 `v1.1.0-rc.4`；推送与拉取摘要一致：`sha256:1161c3bd245d58a56eacd67e83701e2894533658cb8ce3d80b01c6b42cecb801`。
+- 匿名拉取后镜像本地大小 244,989,604 字节，空闲内存 44.88 MiB，PID1 RSS 69,920 KiB。真实 Mihomo 检查中镜像大小 102,916,352 字节、空闲内存 8.918 MiB。上述不含 NapCat/QQ，也不代表 Windows、用户主机、实际订阅规模或下载峰值；没有承诺合并容器或资源下降。
+
+未完成：当前 Windows 开发机没有 Docker CLI 或 Docker Desktop，因此未进行 Windows Docker Desktop 的首次部署与重建实机验收。未访问用户真实订阅、下载源或登录后的 UGOS 网关；这些现场结果不能由本机替身或 CI 代替。
+
 ## 1.1.0-rc.3 候选版
 
 日期：2026-11-01（Asia/Shanghai）。修复图片源实际切换与下载预算，新增下载设置、停止任务和 NAS 独立 Mihomo 管理。
