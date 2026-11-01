@@ -62,7 +62,8 @@ class DownloadSession:
     def check(self):
         with self._lock:
             now = time.monotonic()
-            if self._failure is None and now - self._start >= self.settings["job_timeout"]:
+            if (self._failure is None and self._state["stage"] in ("metadata", "images")
+                    and now - self._start >= self.settings["job_timeout"]):
                 self.fail("deadline", "下载已达到任务时限")
             if self._failure is None and self._state["stage"] == "metadata" and now - self._start >= 60:
                 self.fail("api_timeout", "漫画信息获取超时")
@@ -282,6 +283,7 @@ def download_pdf(album_id: str, job_dir: Path, *, session=None) -> Path:
     images = result.manifest.image_filepath_list
     if not result.downloader.all_success or not images:
         raise DownloadFailure("image_sources_exhausted", "漫画下载不完整，拒绝生成 PDF")
+    session.update(stage="pdf")
     try:
         for image in images:
             session.check()

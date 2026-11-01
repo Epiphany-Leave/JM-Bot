@@ -165,7 +165,7 @@ async def smoke(image: str) -> None:
                     await docker("rm", "--force", name + suffix)
                 except (RuntimeError, FileNotFoundError):
                     pass
-            # Only these three temporary mounts belong to this invocation.
+            # Only these temporary mounts belong to this invocation.
             try:
                 await docker(
                     "run", "--rm", "--name", name + "-cleanup", "--network", "none",

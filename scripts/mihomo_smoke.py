@@ -41,6 +41,24 @@ async def smoke(image: str) -> None:
     name = "jm-mihomo-smoke-" + uuid.uuid4().hex[:12]
     fail_users = set()
     seen_users = []
+    node_events = []
+
+    class SmokeProxy(ManagedProxy):
+        async def _probe(self):
+            try:
+                await super()._probe()
+            except ProxyError:
+                # Capture only controlled fixture names/health, before import rolls the core back.
+                try:
+                    provider = await self._api("GET", "/providers/proxies/subscription")
+                    health = [(node["name"], node.get("alive"),
+                               [item.get("alive") for item in node.get("extra", {}).values()])
+                              for node in provider["proxies"]]
+                    selected = await self._api("GET", "/proxies/AUTO")
+                    print(f"Probe diagnostic: nodes={health}; AUTO={selected.get('now')}; fixture={node_events[-30:]}", flush=True)
+                except ProxyError:
+                    print("Probe diagnostic: core unavailable", flush=True)
+                raise
 
     async def read_request(reader):
         raw = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 5)
@@ -61,11 +79,12 @@ async def smoke(image: str) -> None:
                 # Mihomo's HTTP outbound tunnels even a plain HTTP destination.
                 writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
                 await writer.drain()
-                _, headers = await read_request(reader)
+                method, headers = await read_request(reader)
             # Ignore Mihomo's concurrent HEAD health checks in selection assertions.
             if "aiohttp" in headers.get("user-agent", ""):
                 seen_users.append(username)
             status = b"502 Bad Gateway" if username in fail_users else b"204 No Content"
+            node_events.append((username, method, int(status[:3])))
             writer.write(b"HTTP/1.1 " + status + b"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
             await writer.drain()
         except (ValueError, UnicodeError, OSError, asyncio.IncompleteReadError, asyncio.TimeoutError):
@@ -81,11 +100,10 @@ async def smoke(image: str) -> None:
             root = Path(temporary).resolve()
             store = SmokeStore(root)
             async with aiohttp.ClientSession(trust_env=False) as session:
-                manager = ManagedProxy(store, root, session, test_url="http://smoke.invalid/generate_204")
+                manager = SmokeProxy(store, root, session, test_url="http://smoke.invalid/generate_204")
                 manager.prepare()
                 try:
                     await docker("run", "--detach", "--name", name,
-                                 "--add-host", "host.docker.internal:host-gateway",
                                  "--publish", "127.0.0.1::9090", "--publish", "127.0.0.1::7890",
                                  "--mount", f"type=bind,src={root},dst={root}",
                                  image, "-d", str(root), "-f", str(root / "config.yaml"))
@@ -93,6 +111,10 @@ async def smoke(image: str) -> None:
                     proxy_port = (await docker("port", name, "7890/tcp")).rsplit(":", 1)[-1]
                     manager.api_url = f"http://127.0.0.1:{api_port}"
                     manager.server_url = f"http://127.0.0.1:{proxy_port}"
+                    gateway = await docker("inspect", "--format",
+                                           "{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}", name)
+                    if not gateway:
+                        raise RuntimeError("Docker bridge gateway was not found")
 
                     async def wait_core():
                         for attempt in range(30):
@@ -110,7 +132,7 @@ async def smoke(image: str) -> None:
                     else:
                         raise AssertionError("Empty bootstrap must fail closed")
 
-                    nodes = [{"name": user, "type": "http", "server": "host.docker.internal",
+                    nodes = [{"name": user, "type": "http", "server": gateway,
                               "port": node_port, "username": user, "password": "smoke-node-password"}
                              for user in ("alpha", "beta")]
                     upload = yaml.safe_dump({"proxies": nodes, "mixed-port": 1,
@@ -160,7 +182,7 @@ async def smoke(image: str) -> None:
                     print("PASS: real core parse/load, owned listeners, node selection, rollback and HTTP proxy probe", flush=True)
 
                     # Mihomo's native provider parser is responsible for URI and Base64 formats.
-                    uri = f"http://uri-alpha:smoke-node-password@host.docker.internal:{node_port}#uri-alpha"
+                    uri = f"http://uri-alpha:smoke-node-password@{gateway}:{node_port}#uri-alpha"
                     for content in (uri, base64.b64encode(uri.encode()).decode()):
                         await manager.import_subscription(content=content)
                         assert seen_users[-1] == "uri-alpha"
@@ -171,10 +193,13 @@ async def smoke(image: str) -> None:
                     await wait_core()
                     restored = SmokeStore(root)
                     restored.state = json.loads(restored.path.read_text())
-                    manager = ManagedProxy(restored, root, session, api_url=manager.api_url,
+                    manager = SmokeProxy(restored, root, session, api_url=manager.api_url,
                                            server_url=manager.server_url, test_url=manager.test_url)
                     await manager.ensure_ready()
                     assert seen_users[-1] == "uri-alpha"
+                    size = await docker("image", "inspect", "--format", "{{.Size}}", image)
+                    memory = await docker("stats", "--no-stream", "--format", "{{.MemUsage}}", name)
+                    print(f"Mihomo image size: {size} bytes; idle memory: {memory}", flush=True)
                     await docker("stop", "--time", "1", name)
                     try:
                         await manager.ensure_ready()

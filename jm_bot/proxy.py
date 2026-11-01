@@ -143,7 +143,7 @@ class ManagedProxy:
                                         timeout=aiohttp.ClientTimeout(total=12),
                                         allow_redirects=False) as response:
                 if response.status != 204:
-                    raise ProxyError("代理连通性验证失败；节点必须能够访问验证地址")
+                    raise ProxyError(f"代理连通性验证失败（HTTP {response.status}）；节点必须能够访问验证地址")
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
             raise ProxyError("代理连通性验证失败，请更换节点后重试") from None
 

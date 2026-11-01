@@ -209,6 +209,25 @@ class NetworkTests(unittest.TestCase):
         self.assertFalse(list(self.job.glob("*.pdf")))
         self.assertFalse(list(self.job.rglob("*.part*")))
 
+    def test_pdf_completion_is_outside_network_deadline(self):
+        host = self.server()
+        client, session = self.client()
+        self.album_client(client, host, count=1)
+        convert = d.img2pdf.convert
+
+        def slow_conversion(*args, **kwargs):
+            result = convert(*args, **kwargs)
+            session._start -= session.settings["job_timeout"] + 1
+            return result
+
+        with patch.object(d, "_client", return_value=client), patch.object(
+            d.img2pdf, "convert", side_effect=slow_conversion
+        ):
+            pdf = d.download_pdf("123", self.job, session=session)
+        with pikepdf.open(pdf) as document:
+            self.assertEqual(len(document.pages), 1)
+        self.assertEqual(session.snapshot()["stage"], "complete")
+
     def test_image_total_timeout_fails_over_with_real_transport(self):
         slow = self.server(delay=1.4)
         fast = self.server()
