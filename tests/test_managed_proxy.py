@@ -1,6 +1,8 @@
+import asyncio
 import tempfile
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 import aiohttp
 from aiohttp import web
@@ -37,6 +39,9 @@ class ManagedProxyTests(unittest.IsolatedAsyncioTestCase):
         self.fail_probe = False
         self.ambiguous_apply = False
         self.health_checks = 0
+        self.health_delay = 0
+        self.health_status = 204
+        self.probe_calls = 0
         self.auto_ready = False
         self.source = "proxies:\n- {name: alpha, type: http, server: 127.0.0.1, port: 8080}\n"
         app = web.Application()
@@ -58,6 +63,7 @@ class ManagedProxyTests(unittest.IsolatedAsyncioTestCase):
 
     async def serve(self, request):
         if request.path == "/generate_204":
+            self.probe_calls += 1
             self.assertEqual(request.headers.get("Proxy-Authorization"), "Basic am06cHJveHktc2VjcmV0")
             if self.selected == "AUTO":
                 self.assertTrue(self.auto_ready, "AUTO probe ran before synchronous health checks finished")
@@ -78,7 +84,10 @@ class ManagedProxyTests(unittest.IsolatedAsyncioTestCase):
             return web.Response(status=204)
         if request.path == "/providers/proxies/subscription/healthcheck":
             self.health_checks += 1
+            if self.health_status != 204:
+                return web.Response(status=self.health_status)
             self.auto_ready = True
+            await asyncio.sleep(self.health_delay)
             return web.Response(status=204)
         if request.path == "/providers/proxies/subscription":
             provider = self.loaded.get("proxy-providers", {}).get("subscription")
@@ -110,6 +119,30 @@ class ManagedProxyTests(unittest.IsolatedAsyncioTestCase):
         self.selected = "REJECT"
         await self.proxy.ensure_ready()
         self.assertEqual(self.selected, "AUTO")
+
+    async def test_slow_pool_healthcheck_still_requires_real_auto_proxy_success(self):
+        self.health_delay = 0.1
+        timeout = asyncio.timeout
+        with patch("jm_bot.proxy.asyncio.timeout", side_effect=lambda seconds: timeout(0.01 if seconds == 5 else seconds)):
+            result = await self.proxy.import_subscription(content=self.source)
+        self.assertTrue(result["healthy"])
+        self.assertEqual(self.health_checks, 1)
+        self.assertEqual(self.probe_calls, 1)
+        self.assertEqual(self.store.state["proxy"]["node"], "AUTO")
+        previous = dict(self.store.state["proxy"])
+        self.fail_probe = True
+        with patch("jm_bot.proxy.asyncio.timeout", side_effect=lambda seconds: timeout(0.01 if seconds == 5 else seconds)):
+            with self.assertRaises(ProxyError):
+                await self.proxy.import_subscription(content=self.source.replace("alpha", "beta"))
+        self.assertEqual(self.probe_calls, 2)
+        self.assertEqual(self.store.state["proxy"], previous)
+
+    async def test_healthcheck_auth_error_is_not_treated_as_timeout(self):
+        self.health_status = 401
+        with self.assertRaises(ProxyError):
+            await self.proxy.import_subscription(content=self.source)
+        self.assertEqual(self.probe_calls, 0)
+        self.assertFalse(self.store.state["proxy"])
 
     async def test_failed_import_preserves_last_good_disk_state_and_core(self):
         await self.proxy.import_subscription(content=self.source)

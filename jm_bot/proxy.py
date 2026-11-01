@@ -132,8 +132,12 @@ class ManagedProxy:
 
     async def _activate(self, node: str) -> None:
         if node == AUTO:
-            # This endpoint waits for Mihomo's concurrent checks; our API deadline bounds the wait.
-            await self._api("GET", f"/providers/proxies/{PROVIDER}/healthcheck")
+            # A large pool may still be checking; only the real proxy probe decides readiness.
+            try:
+                async with asyncio.timeout(5):
+                    await self._api("GET", f"/providers/proxies/{PROVIDER}/healthcheck")
+            except TimeoutError:
+                pass
         await self._select(node)
         await self._probe()
 

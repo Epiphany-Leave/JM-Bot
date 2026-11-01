@@ -190,6 +190,11 @@ async def smoke(image: str) -> None:
 
                     manager.prepare()
                     await docker("restart", name)
+                    # Docker may allocate new host ports for an ephemeral publish on restart.
+                    api_port = (await docker("port", name, "9090/tcp")).rsplit(":", 1)[-1]
+                    proxy_port = (await docker("port", name, "7890/tcp")).rsplit(":", 1)[-1]
+                    manager.api_url = f"http://127.0.0.1:{api_port}"
+                    manager.server_url = f"http://127.0.0.1:{proxy_port}"
                     await wait_core()
                     restored = SmokeStore(root)
                     restored.state = json.loads(restored.path.read_text())
