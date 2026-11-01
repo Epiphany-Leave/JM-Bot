@@ -237,6 +237,30 @@ class NetworkTests(unittest.TestCase):
         self.assertEqual([host for host, _ in self.calls], [slow, fast])
         self.assertEqual(session.snapshot()["completed_pages"], 1)
 
+    def test_all_image_timeouts_are_distinct_from_mixed_source_failures_without_pdf(self):
+        for all_timeouts, expected in ((True, "image_timeout"), (False, "image_sources_exhausted")):
+            with self.subTest(all_timeouts=all_timeouts):
+                self.calls.clear()
+                first = self.server(delay=1.4)
+                second = self.server(delay=1.4) if all_timeouts else self.server(b"corrupt")
+                client, session = self.client({"connect_timeout": 1, "image_timeout": 1,
+                                               "max_sources": 2, "concurrency": 1})
+                self.album_client(client, first, count=1)
+                with patch.object(d, "_client", return_value=client), patch.object(
+                    JmModuleConfig, "DOMAIN_IMAGE_LIST", [first, second]
+                ):
+                    with self.assertRaises(d.DownloadFailure) as failure:
+                        d.download_pdf("123", self.job, session=session)
+                self.assertEqual(failure.exception.code, expected)
+                if all_timeouts:
+                    self.assertIn("检测下载线路", failure.exception.message)
+                    self.assertIn("更换代理", failure.exception.message)
+                self.assertEqual([host for host, _ in self.calls], [first, second])
+                self.assertEqual(session.snapshot()["completed_pages"], 0)
+                self.assertTrue(session.control.is_cancelled)
+                self.assertFalse(list(self.job.glob("*.pdf")))
+                self.assertFalse(list(self.job.rglob("*.part*")))
+
     def test_native_concurrent_workers_join_after_first_image_failure(self):
         host = self.server(b"broken", delay=lambda path: 0.1 if "00000" in path else 0.3)
         client, session = self.client({"max_sources": 1, "concurrency": 3})

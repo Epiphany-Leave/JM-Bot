@@ -11,6 +11,7 @@ import img2pdf
 import jmcomic
 from common import Postmans
 from curl_cffi.requests import Session
+from curl_cffi.requests.exceptions import Timeout as CurlTimeout
 from jmcomic.jm_exception import MissingAlbumPhotoException
 from PIL import Image
 
@@ -148,12 +149,16 @@ class _TaskClient(jmcomic.JmApiClient):
                 return self.raise_if_resp_should_retry(response, is_image)
             except DownloadFailure:
                 raise
+            except CurlTimeout:
+                self.session.check()
+                if is_image:
+                    raise DownloadFailure("image_timeout", "图片源请求超时") from None
             except Exception:
                 self.session.check()
         if not is_image:
             self.session.fail("api_timeout", "漫画信息请求失败或超时")
             self.session.check()
-        raise DownloadFailure("api_timeout", "图片请求失败或超时")
+        raise DownloadFailure("image_sources_exhausted", "图片源请求失败")
 
     def sources(self, url):
         original = urlsplit(url)
@@ -176,6 +181,7 @@ class _TaskClient(jmcomic.JmApiClient):
         path = Path(img_save_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         partial = path.with_name(path.stem + ".part" + path.suffix)
+        failures = []
         for target in self.sources(img_url):
             self.session.check()
             self.session.update(source=urlsplit(target).netloc)
@@ -195,14 +201,19 @@ class _TaskClient(jmcomic.JmApiClient):
                             self.session.snapshot()["completed_pages"])
                 return
             except DownloadFailure as error:
+                failures.append(error.code)
                 logger.warning("image source failed source=%s type=%s", urlsplit(target).netloc, error.code)
                 self.session.check()
             except Exception as error:
+                failures.append(type(error).__name__)
                 logger.warning("image source failed source=%s type=%s", urlsplit(target).netloc, type(error).__name__)
                 self.session.check()
             finally:
                 partial.unlink(missing_ok=True)
-        self.session.fail("image_sources_exhausted", "图片候选源均失败，已停止下载")
+        if failures and all(code == "image_timeout" for code in failures):
+            self.session.fail("image_timeout", "图片源均请求超时，请检测下载线路或更换代理后重试")
+        else:
+            self.session.fail("image_sources_exhausted", "图片候选源均失败，已停止下载")
         self.session.check()
 
 

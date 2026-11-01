@@ -103,6 +103,7 @@ async def check_download_ui(page, runtime, peer, output):
                 await asyncio.sleep(0.02)
         await expect(page.locator("#download-save")).to_be_enabled(timeout=8000)
         await expect(stop).to_be_disabled()
+        await expect(page.locator("#tab-download [data-cancel-feedback]")).to_be_hidden()
         await expect(page.locator("#download-concurrency")).to_have_value("5")
         await expect(page.locator("#download-unsaved")).to_be_visible()
         assert runtime.store.get_download_settings()["concurrency"] == 3

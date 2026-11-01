@@ -319,10 +319,14 @@ function renderDownloadProgress(status) {
     task.album_id ? `本子：${task.album_id}` : '当前任务',
     `进度：${task.completed_pages ?? '—'} / ${task.total_pages ?? '—'} 页`,
     `图片源：${task.source || '等待选择'}`,
-    `阶段：${stages[task.stage] || task.stage || '等待状态'}`,
+    `阶段：${task.stop_reason ? '正在停止' : stages[task.stage] || task.stage || '等待状态'}`,
     `停止原因：${task.stop_reason || '无'}`,
   ].join('\n') : status.busy ? '正在处理其他任务，暂无下载进度。' : '暂无下载任务';
   for (const element of document.querySelectorAll('[data-download-progress]')) element.textContent = progress;
+  if (!status.busy) for (const element of document.querySelectorAll('[data-cancel-feedback]')) {
+    element.hidden = true;
+    element.textContent = '';
+  }
   $('download-current-mode').textContent = `当前生效：${status.download_mode === 'mihomo' ? 'NAS 独立代理' : status.download_mode === 'direct' ? '直连' : '等待读取'}。检测使用已保存的线路。`;
 }
 
