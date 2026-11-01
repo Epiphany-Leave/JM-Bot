@@ -24,7 +24,7 @@ def event(text="/jm 11451", user=10001, group=None, **extra):
             "message_id": next(ids), "message": [{"type": "text", "data": {"text": text}}], **extra}
 
 
-def make_pdf(album_id, job):
+def make_pdf(album_id, job, *, session=None):
     images = job / "images"
     images.mkdir()
     image = images / "test.png"
@@ -169,7 +169,7 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.uploads()), 1)
 
     async def test_download_error_removes_partial_files_and_never_uploads(self):
-        def fail(album_id, job):
+        def fail(album_id, job, *, session=None):
             (job / "partial").write_bytes(b"incomplete")
             raise RuntimeError("download failed")
         with patch.object(module, "download_pdf", side_effect=fail):
@@ -188,7 +188,7 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("结果未确认" in text for text in self.messages()))
 
     async def test_reconnection_during_download_does_not_upload_old_job(self):
-        def disconnect(album_id, job):
+        def disconnect(album_id, job, *, session=None):
             pdf = make_pdf(album_id, job)
             self.client.generation = 2
             return pdf
@@ -220,7 +220,7 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_busy_reply_does_not_wait_for_background_download(self):
         entered, release = threading.Event(), threading.Event()
-        def slow(album_id, job):
+        def slow(album_id, job, *, session=None):
             entered.set()
             if not release.wait(5):
                 raise TimeoutError("test did not release worker")
@@ -238,7 +238,7 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_repeated_cancellation_waits_for_worker_and_preserves_completed_pdf(self):
         entered, release = threading.Event(), threading.Event()
-        def slow(album_id, job):
+        def slow(album_id, job, *, session=None):
             entered.set()
             if not release.wait(5):
                 raise TimeoutError("test did not release worker")

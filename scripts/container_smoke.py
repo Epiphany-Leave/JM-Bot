@@ -57,7 +57,7 @@ async def smoke(image: str) -> None:
         root = Path(directory).resolve()
         root.chmod(0o755)
         mounts = []
-        for folder in ("data", "napcat-config", "downloads"):
+        for folder in ("data", "napcat-config", "downloads", "proxy-data"):
             path = root / folder
             path.mkdir(mode=0o755)
             mounts.extend(("--mount", f"type=bind,src={path},dst=/{folder}"))
@@ -67,7 +67,7 @@ async def smoke(image: str) -> None:
             "assert state_path.stat().st_mode & 0o777 == 0o600\n"
             "assert state_path.stat().st_uid == 0\n"
             "state = json.loads(state_path.read_text())\n"
-            "tokens = [state[key] for key in ('onebot_token', 'napcat_token')]\n"
+            "tokens = [state[key] for key in ('onebot_token', 'napcat_token', 'proxy_control_token', 'proxy_password')]\n"
             "assert all(isinstance(token, str) and len(token) >= 32 for token in tokens)\n"
             "webui = Path('/napcat-config/webui.json')\n"
             "assert webui.stat().st_mode & 0o777 == 0o600\n"
@@ -171,7 +171,7 @@ async def smoke(image: str) -> None:
                     "run", "--rm", "--name", name + "-cleanup", "--network", "none",
                     "--user", "0:0", *mounts, "--entrypoint", "python", image, "-c",
                     "from pathlib import Path; import shutil\n"
-                    "for folder in ('/data', '/napcat-config', '/downloads'):\n"
+                    "for folder in ('/data', '/napcat-config', '/downloads', '/proxy-data'):\n"
                     "    for path in Path(folder).iterdir():\n"
                     "        if path.is_dir() and not path.is_symlink(): shutil.rmtree(path)\n"
                     "        else: path.unlink()\n"

@@ -12,6 +12,14 @@ let editVersion = 0;
 let testSending = false;
 let qrVisible = false;
 let qrLoading = false;
+const downloadDefaults = { mode: 'direct', concurrency: 3, connect_timeout: 8, image_timeout: 45, max_sources: 3, stall_timeout: 150, job_timeout: 1800 };
+let downloadLoaded = false;
+let downloadLoading = false;
+let downloadEditVersion = 0;
+let downloadPending = false;
+let proxyStatus = null;
+let proxyLoading = false;
+let cancelPending = false;
 
 function feedback(id, message, error = false) {
   const element = $(id);
@@ -37,6 +45,9 @@ async function api(path, options = {}) {
 function showLogin() {
   sessionVersion += 1;
   authenticated = false;
+  downloadLoaded = false;
+  proxyStatus = null;
+  latestStatus = null;
   clearTimeout(pollTimer);
   $('app-view').hidden = true;
   $('login-view').hidden = false;
@@ -46,10 +57,12 @@ function showApp() {
   authenticated = true;
   $('login-view').hidden = true;
   $('app-view').hidden = false;
+  loadDownloadSettings();
+  loadProxyStatus();
 }
 
 function setTab(name) {
-  const titles = { overview: '运行概览', qq: 'QQ 登录', permissions: '使用权限' };
+  const titles = { overview: '运行概览', qq: 'QQ 登录', permissions: '使用权限', download: '下载设置' };
   if (!titles[name]) name = 'overview';
   for (const button of document.querySelectorAll('[data-tab]')) {
     const selected = button.dataset.tab === name;
@@ -60,6 +73,10 @@ function setTab(name) {
   for (const panel of document.querySelectorAll('.tab-panel')) panel.hidden = panel.id !== `tab-${name}`;
   $('page-title').textContent = titles[name];
   history.replaceState(null, '', `#${name}`);
+  if (name === 'download' && authenticated) {
+    if (!downloadLoaded) loadDownloadSettings();
+    if (!proxyStatus) loadProxyStatus();
+  }
 }
 
 function badge(id, message, kind) {
@@ -68,7 +85,7 @@ function badge(id, message, kind) {
 }
 
 function updateTestButton() {
-  $('test-submit').disabled = testSending || !latestStatus?.ready || !!latestStatus?.busy || !$('test-target').value;
+  $('test-submit').disabled = testSending || downloadPending || proxyLoading || !latestStatus?.ready || !!latestStatus?.busy || !$('test-target').value;
 }
 
 function refreshQrImage() {
@@ -95,7 +112,7 @@ function renderStatus(status) {
   $('channel-state').textContent = status.onebot_connected ? '已连接' : '等待连接';
   $('channel-detail').textContent = status.onebot_connected ? (status.config_synced ? '消息与配置均已就绪' : '正在同步机器人设置') : 'QQ 登录后会自动建立连接';
   const task = status.current_task;
-  const stages = { downloading: '正在下载', download: '正在下载', converting: '正在合成 PDF', uploading: '正在上传', upload: '正在上传', completed: '处理完成' };
+  const stages = { metadata: '正在获取漫画信息', images: '正在下载图片', pdf: '正在合成 PDF', complete: '下载完成', stopping: '正在停止', downloading: '正在下载', download: '正在下载', converting: '正在合成 PDF', uploading: '正在上传', upload: '正在上传', completed: '处理完成' };
   $('task-state').textContent = status.busy ? (task?.album_id ? `JM ${task.album_id}` : '正在处理') : '空闲';
   $('task-detail').textContent = status.busy ? (stages[task?.stage] || task?.stage || '正在处理，请耐心等待') : '单次处理一本，完成后可继续';
   feedback('global-error', status.error);
@@ -133,6 +150,8 @@ function renderStatus(status) {
   }
   $('refresh-qr').disabled = qrLoading || !status.napcat_reachable;
   updateTestButton();
+  renderDownloadProgress(status);
+  updateDownloadControls();
 }
 
 async function pollStatus() {
@@ -152,6 +171,7 @@ async function pollStatus() {
       latestStatus = null;
       badge('header-state', '状态暂不可用', 'amber');
       updateTestButton();
+      updateDownloadControls();
     }
   }
   if (authenticated) pollTimer = setTimeout(pollStatus, 3000);
@@ -261,6 +281,220 @@ function markDirty() {
   feedback('permissions-feedback', '');
 }
 
+function writeDownloadDraft(settings) {
+  for (const key of Object.keys(downloadDefaults)) {
+    $(`download-${key}`).value = key === 'job_timeout' ? settings[key] / 60 : settings[key];
+  }
+}
+
+function markDownloadDirty() {
+  downloadEditVersion += 1;
+  $('download-unsaved').hidden = false;
+  feedback('download-feedback', '');
+}
+
+function updateDownloadControls() {
+  updateTestButton();
+  const busy = !latestStatus || !!latestStatus.busy || testSending;
+  const locked = busy || downloadPending || proxyLoading;
+  $('download-save').disabled = locked || !downloadLoaded;
+  $('download-detect').disabled = locked || !downloadLoaded;
+  $('download-busy-note').hidden = !latestStatus?.busy;
+  $('proxy-import').disabled = locked || !proxyStatus?.available;
+  $('proxy-refresh').disabled = locked || !proxyStatus?.configured;
+  $('proxy-choose').disabled = locked || !proxyStatus?.configured;
+  $('proxy-node').disabled = locked || !proxyStatus?.configured;
+  $('proxy-status-refresh').disabled = locked;
+  const proxyOption = [...$('download-mode').options].find((option) => option.value === 'mihomo');
+  proxyOption.disabled = !proxyStatus?.configured || !proxyStatus?.healthy;
+  for (const button of document.querySelectorAll('[data-cancel-download]')) {
+    button.disabled = cancelPending || !latestStatus?.busy || !latestStatus?.current_task?.cancellable;
+  }
+}
+
+function renderDownloadProgress(status) {
+  const task = status.current_task;
+  const stages = { metadata: '正在获取漫画信息', images: '正在下载图片', pdf: '正在合成 PDF', complete: '下载完成', stopping: '正在停止', downloading: '正在下载', download: '正在下载', converting: '正在合成 PDF', uploading: '正在上传', upload: '正在上传', completed: '处理完成', cancelling: '正在停止', stopped: '已停止' };
+  const progress = task ? [
+    task.album_id ? `本子：${task.album_id}` : '当前任务',
+    `进度：${task.completed_pages ?? '—'} / ${task.total_pages ?? '—'} 页`,
+    `图片源：${task.source || '等待选择'}`,
+    `阶段：${stages[task.stage] || task.stage || '等待状态'}`,
+    `停止原因：${task.stop_reason || '无'}`,
+  ].join('\n') : status.busy ? '正在处理其他任务，暂无下载进度。' : '暂无下载任务';
+  for (const element of document.querySelectorAll('[data-download-progress]')) element.textContent = progress;
+  $('download-current-mode').textContent = `当前生效：${status.download_mode === 'mihomo' ? 'NAS 独立代理' : status.download_mode === 'direct' ? '直连' : '等待读取'}。检测使用已保存的线路。`;
+}
+
+async function loadDownloadSettings() {
+  if (downloadLoading || downloadLoaded) return;
+  downloadLoading = true;
+  const version = downloadEditVersion;
+  const session = sessionVersion;
+  feedback('download-feedback', '正在读取下载设置…');
+  try {
+    const settings = await api('/api/download-settings');
+    if (session !== sessionVersion) return;
+    if (version === downloadEditVersion) writeDownloadDraft(settings);
+    downloadLoaded = true;
+    feedback('download-feedback', '');
+  } catch (error) {
+    if (session === sessionVersion) feedback('download-feedback', `设置未加载，可重新进入本页重试。${error.message}`, true);
+  } finally {
+    downloadLoading = false;
+    updateDownloadControls();
+  }
+}
+
+function renderProxyStatus(status) {
+  proxyStatus = status;
+  $('proxy-state').textContent = !status.available ? `代理服务不可用。${status.error || ''}` : !status.configured ? '尚未导入节点。默认使用直连。' : `${status.healthy ? '代理连接正常' : '连接待验证，可应用节点或检测线路'} · 当前节点：${status.node || '自动'}${status.error ? `\n${status.error}` : ''}`;
+  const selection = $('proxy-node').value;
+  const select = $('proxy-node');
+  select.replaceChildren();
+  for (const name of new Set(['AUTO', ...(status.nodes || [])])) {
+    const option = document.createElement('option');
+    option.value = name;
+    option.textContent = name === 'AUTO' ? '自动' : name;
+    select.append(option);
+  }
+  select.value = [...select.options].some((option) => option.value === selection) && select.dataset.dirty ? selection : status.node || 'AUTO';
+  if (!select.value) select.value = 'AUTO';
+  updateDownloadControls();
+}
+
+async function loadProxyStatus() {
+  if (proxyLoading || downloadPending) return;
+  proxyLoading = true;
+  updateDownloadControls();
+  const session = sessionVersion;
+  try {
+    const status = await api('/api/proxy/status');
+    if (session === sessionVersion) renderProxyStatus(status);
+  } catch (error) {
+    if (session === sessionVersion) feedback('proxy-feedback', error.message, true);
+  } finally {
+    proxyLoading = false;
+    updateDownloadControls();
+  }
+}
+
+async function downloadAction(feedbackId, message, action) {
+  if (downloadPending || proxyLoading || !latestStatus || latestStatus.busy || testSending) return;
+  downloadPending = true;
+  updateDownloadControls();
+  feedback(feedbackId, message);
+  try {
+    await action();
+  } catch (error) {
+    feedback(feedbackId, error.message, true);
+  } finally {
+    downloadPending = false;
+    updateDownloadControls();
+  }
+}
+
+$('download-form').addEventListener('input', markDownloadDirty);
+$('download-reset').addEventListener('click', () => {
+  writeDownloadDraft(downloadDefaults);
+  markDownloadDirty();
+  feedback('download-feedback', '已恢复推荐值，保存后生效。');
+});
+$('download-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  if (!downloadLoaded || !$('download-form').reportValidity()) return;
+  const settings = {};
+  for (const key of Object.keys(downloadDefaults)) {
+    const value = $(`download-${key}`).value;
+    settings[key] = key === 'mode' ? value : key === 'job_timeout' ? Math.round(Number(value) * 60) : Number(value);
+  }
+  if (settings.image_timeout < settings.connect_timeout) {
+    feedback('download-feedback', '单次图片总等待不能小于连接等待。', true);
+    return;
+  }
+  if (settings.mode === 'mihomo' && (!proxyStatus?.configured || !proxyStatus?.healthy)) {
+    feedback('download-feedback', '请先导入节点，并确认代理连接正常，再保存 NAS 独立代理模式。', true);
+    return;
+  }
+  const version = downloadEditVersion;
+  downloadAction('download-feedback', '正在保存下载设置…', async () => {
+    await api('/api/download-settings', { method: 'PUT', body: JSON.stringify(settings) });
+    if (version === downloadEditVersion) $('download-unsaved').hidden = true;
+    feedback('download-feedback', version === downloadEditVersion ? '已保存，下载设置已生效。' : '已保存。你刚刚的修改仍需再次保存。');
+    await pollStatus();
+  });
+});
+$('download-test-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const album_id = $('download-test-id').value.trim();
+  if (!/^[0-9]+$/.test(album_id) || /^0+$/.test(album_id)) {
+    feedback('download-test-feedback', '请填写正整数本子 ID。', true);
+    return;
+  }
+  downloadAction('download-test-feedback', '正在检测已保存的下载线路，请稍候…', async () => {
+    const result = await api('/api/download/test', { method: 'POST', body: JSON.stringify({ album_id }) });
+    feedback('download-test-feedback', `接口：${result.api_ok ? '通过' : '未通过'}；图片：${result.image_ok ? '通过' : '未通过'}\n图片源：${result.source || '无'}\n${result.message || ''}`, !result.api_ok || !result.image_ok);
+    await pollStatus();
+  });
+});
+$('proxy-import-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const url = $('proxy-url').value.trim();
+  const file = $('proxy-file').files[0];
+  if ((!url && !file) || (url && file)) {
+    feedback('proxy-feedback', '请选择订阅链接或配置文件中的一种。', true);
+    return;
+  }
+  if (file && (!/\.(yaml|yml|txt)$/i.test(file.name) || file.size > 2 * 1024 * 1024)) {
+    feedback('proxy-feedback', '请选择不超过 2 MiB 的 .yaml、.yml 或 .txt 文件。', true);
+    return;
+  }
+  downloadAction('proxy-feedback', '正在导入并测试代理连接，请稍候…', async () => {
+    const body = file ? { content: await file.text() } : { url };
+    const result = await api('/api/proxy/import', { method: 'POST', body: JSON.stringify(body) });
+    if ($('proxy-url').value.trim() === url) $('proxy-url').value = '';
+    if ($('proxy-file').files[0] === file) $('proxy-file').value = '';
+    delete $('proxy-node').dataset.dirty;
+    renderProxyStatus(result);
+    feedback('proxy-feedback', result.message || '节点已导入并测试。连接正常后可选择 NAS 独立代理并保存。');
+  });
+});
+$('proxy-node').addEventListener('change', () => { $('proxy-node').dataset.dirty = 'true'; });
+$('proxy-status-refresh').addEventListener('click', loadProxyStatus);
+for (const [id, path, method] of [['proxy-refresh', '/api/proxy/refresh', 'POST'], ['proxy-choose', '/api/proxy/node', 'PUT']]) {
+  $(id).addEventListener('click', () => downloadAction('proxy-feedback', '正在更新代理，请稍候…', async () => {
+    const result = await api(path, { method, body: JSON.stringify(id === 'proxy-choose' ? { name: $('proxy-node').value } : {}) });
+    delete $('proxy-node').dataset.dirty;
+    renderProxyStatus(result);
+    feedback('proxy-feedback', result.message || '代理已更新。');
+  }));
+}
+for (const button of document.querySelectorAll('[data-cancel-download]')) {
+  button.addEventListener('click', async () => {
+    if (cancelPending || !latestStatus?.busy || !latestStatus.current_task?.cancellable) return;
+    cancelPending = true;
+    updateDownloadControls();
+    const show = (message, error = false) => {
+      for (const element of document.querySelectorAll('[data-cancel-feedback]')) {
+        element.textContent = message;
+        element.hidden = false;
+        element.classList.toggle('error', error);
+      }
+    };
+    show('正在请求停止…');
+    try {
+      const result = await api('/api/task/cancel', { method: 'POST', body: '{}' });
+      show(result.message || '已请求停止，请等待下载线程结束。', result.ok === false);
+      await pollStatus();
+    } catch (error) {
+      show(error.message, true);
+    } finally {
+      cancelPending = false;
+      updateDownloadControls();
+    }
+  });
+}
+
 $('login-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const button = event.submitter;
@@ -365,6 +599,7 @@ $('test-form').addEventListener('submit', async (event) => {
   if (!target_id) return;
   testSending = true;
   updateTestButton();
+  updateDownloadControls();
   feedback('test-feedback', '正在发送测试 PDF，请稍候…');
   try {
     const result = await api('/api/test-file', { method: 'POST', body: JSON.stringify({ kind, target_id }) });
@@ -377,6 +612,7 @@ $('test-form').addEventListener('submit', async (event) => {
   } finally {
     testSending = false;
     updateTestButton();
+    updateDownloadControls();
   }
 });
 

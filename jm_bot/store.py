@@ -8,6 +8,7 @@ import tempfile
 import re
 
 from .config import positive_id
+from .download_settings import download_settings
 
 
 def permissions(value: dict) -> dict:
@@ -73,6 +74,19 @@ class StateStore:
                 }),
             }
             atomic_json(self.path, state)
+        updated = dict(state)
+        updated["download"] = download_settings(state.get("download"))
+        for key in ("proxy_control_token", "proxy_password"):
+            if key not in updated:
+                updated[key] = secrets.token_urlsafe(32)
+            elif not isinstance(updated[key], str) or re.fullmatch(r"[A-Za-z0-9_-]{32,}", updated[key]) is None:
+                raise ValueError("data/config.json 中的代理配置无效；程序不会覆盖已有配置")
+        updated.setdefault("proxy", {})
+        if not isinstance(updated["proxy"], dict):
+            raise ValueError("data/config.json 中的代理配置无效")
+        if updated != state:
+            atomic_json(self.path, updated)
+        state = updated
         self.state = state
 
     def get_permissions(self) -> dict:
@@ -84,6 +98,23 @@ class StateStore:
         atomic_json(self.path, updated)
         self.state = updated
         return self.get_permissions()
+
+    def get_download_settings(self) -> dict:
+        return download_settings(self.state["download"])
+
+    def save_download_settings(self, value: dict) -> dict:
+        value = download_settings(value)
+        updated = {**self.state, "download": value}
+        atomic_json(self.path, updated)
+        self.state = updated
+        return self.get_download_settings()
+
+    def save_proxy(self, value: dict) -> None:
+        if not isinstance(value, dict):
+            raise ValueError("代理配置格式无效")
+        updated = {**self.state, "proxy": dict(value)}
+        atomic_json(self.path, updated)
+        self.state = updated
 
     def prepare_napcat(self, directory: Path) -> None:
         directory.mkdir(parents=True, exist_ok=True)

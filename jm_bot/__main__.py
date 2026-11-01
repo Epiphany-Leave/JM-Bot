@@ -12,6 +12,7 @@ from . import __version__
 from .bot import JMBot
 from .config import Settings
 from .napcat import NapCat
+from .proxy import ManagedProxy
 from .store import StateStore
 from .web import Runtime, create_app
 
@@ -36,9 +37,12 @@ async def serve() -> None:
         except NotImplementedError:
             pass  # Windows uses asyncio.run's KeyboardInterrupt handling.
     async with aiohttp.ClientSession(trust_env=False) as session:
+        proxy = ManagedProxy(store, Path(os.environ.get("PROXY_DIR", "/proxy-data")), session)
+        proxy.prepare()
         napcat = NapCat(session, os.environ.get("NAPCAT_URL", "http://napcat:6099"),
                         store.state["napcat_token"], store.state["onebot_token"], config_dir)
-        app = create_app(Runtime(store, JMBot(settings), napcat), password,
+        bot = JMBot(settings, download_options=store.get_download_settings, proxy=proxy)
+        app = create_app(Runtime(store, bot, napcat, proxy=proxy), password,
                          Path(__file__).resolve().parent.parent / "samples" / "test.pdf")
         runner = web.AppRunner(app, access_log=None)
         await runner.setup()
@@ -56,6 +60,8 @@ def main() -> None:
     parser.add_argument("--version", action="version", version=__version__)
     parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # Native retry logs can dump request headers and proxy credentials; use our safe task logs.
+    logging.getLogger("jmcomic").disabled = True
     try:
         asyncio.run(serve())
     except (ValueError, OSError) as exc:

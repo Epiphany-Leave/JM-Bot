@@ -6,9 +6,12 @@ import shutil
 import tempfile
 import time
 from dataclasses import replace
+from functools import partial
 
 from .config import Settings, positive_id
-from .downloader import download_pdf
+from .downloader import DownloadFailure, DownloadSession, detect_download, download_pdf
+from .download_settings import download_settings
+from .proxy import ProxyError
 from .onebot import OneBotClient
 
 
@@ -35,7 +38,7 @@ def command_text(message, self_id: str) -> str | None:
 
 
 class JMBot:
-    def __init__(self, settings: Settings, client=None):
+    def __init__(self, settings: Settings, client=None, download_options=None, proxy=None):
         self.settings = settings
         self.client = client or OneBotClient(settings.ws_url, settings.token, self.handle)
         self.data_dir = settings.download_dir
@@ -46,10 +49,91 @@ class JMBot:
         self._seen = OrderedDict()
         self.current_task = None
         self.last_result = None
+        self.download_options = download_options or download_settings
+        self.proxy = proxy
+        self.download_session = None
+        self._last_download_progress = {}
 
     @property
     def busy(self) -> bool:
         return self._lock.locked()
+
+    def task_status(self):
+        if self.current_task is None:
+            return None
+        result = dict(self.current_task)
+        if self.download_session is not None:
+            result.update(self.download_session.snapshot())
+            result["cancellable"] = result.get("stage") in ("metadata", "images") and not result.get("stop_reason")
+        else:
+            result["cancellable"] = False
+        return result
+
+    def stop_download(self) -> None:
+        if self.download_session is None or not self.task_status().get("cancellable"):
+            raise ValueError("当前没有可停止的下载任务")
+        self.download_session.cancel("用户停止下载")
+
+    async def _new_session(self):
+        options = self.download_options()
+        proxy_url = None
+        if options["mode"] == "mihomo":
+            if self.proxy is None:
+                raise DownloadFailure("proxy_unavailable", "NAS 代理未就绪，请先导入订阅并测试连接。")
+            try:
+                async with asyncio.timeout(20):
+                    await self.proxy.ensure_ready()
+                proxy_url = self.proxy.proxy_url
+            except (ProxyError, TimeoutError):
+                raise DownloadFailure("proxy_unavailable", "NAS 代理连接验证失败，请在下载设置中检查节点。") from None
+        return DownloadSession(options, proxy_url=proxy_url)
+
+    async def _download_worker(self, function, album_id, job):
+        self._last_download_progress = {}
+        session = await self._new_session()
+        self.download_session = session
+        worker = asyncio.get_running_loop().run_in_executor(None, partial(function, album_id, job, session=session))
+        try:
+            return await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            session.cancel("任务已取消")
+            while True:
+                try:
+                    await asyncio.shield(worker)
+                    break
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+            raise
+        finally:
+            self._last_download_progress = session.snapshot()
+            self.download_session = None
+
+    def _failure_message(self, error):
+        progress = self._last_download_progress
+        total = progress.get("total_pages", 0)
+        suffix = f"（已完成 {progress.get('completed_pages', 0)}/{total} 页）" if total else ""
+        return error.message + suffix
+
+    async def detect_download(self, album_id: str) -> dict:
+        album_id = positive_id(album_id)
+        if self.busy:
+            raise ValueError("正在处理其他任务，请结束后再检测线路")
+        async with self._lock:
+            self.current_task = {"album_id": album_id, "stage": "检测下载线路"}
+            job = Path(tempfile.mkdtemp(prefix="probe_", dir=self.data_dir))
+            try:
+                result = await self._download_worker(detect_download, album_id, job)
+                self.last_result = {"status": "success" if result.get("api_ok") and result.get("image_ok") else "error",
+                                    "message": result["message"]}
+                return result
+            except DownloadFailure as exc:
+                self.last_result = {"status": "error", "message": self._failure_message(exc), "code": exc.code}
+                raise
+            finally:
+                self.current_task = None
+                await asyncio.to_thread(shutil.rmtree, job, True)
 
     def update_permissions(self, value: dict) -> None:
         self.settings = replace(self.settings, allowed_users=frozenset(value["allowed_users"]),
@@ -143,24 +227,19 @@ class JMBot:
                 job = Path(tempfile.mkdtemp(prefix="job_", dir=self.data_dir))
                 # mkdtemp defaults to 0700; NapCat needs to traverse this directory as another UID.
                 job.chmod(0o755)
-                worker = asyncio.get_running_loop().run_in_executor(None, download_pdf, album_id, job)
                 try:
-                    pdf = await asyncio.shield(worker)
+                    pdf = await self._download_worker(download_pdf, album_id, job)
                 except asyncio.CancelledError:
-                    # Keep the lock and files until the thread really stops, even after repeated cancellation.
-                    while True:
-                        try:
-                            await asyncio.shield(worker)
-                            retain_pdf = True
-                            break
-                        except asyncio.CancelledError:
-                            continue
-                        except Exception:
-                            log.exception("取消时等待下载线程结束失败")
-                            break
+                    retain_pdf = (job / f"jm_{album_id}.pdf").is_file()
                     raise
+            except DownloadFailure as exc:
+                message = self._failure_message(exc)
+                log.warning("Download stopped (%s): %s", exc.code, message)
+                self.last_result = {"status": "error", "message": message, "code": exc.code}
+                await self._reply(target, generation, message + "\n未发送文件，请在 JM 管理台检查下载设置。")
+                return
             except Exception:
-                log.exception("下载或 PDF 合成失败")
+                log.error("Unexpected download or PDF failure", exc_info=False)
                 self.last_result = {"status": "error", "message": "下载或 PDF 合成失败，未发送文件；可检查网络后重试。"}
                 await self._reply(target, generation, "下载或 PDF 合成失败，未发送文件；请查看 jm-bot 日志。")
                 return
@@ -245,6 +324,8 @@ class JMBot:
 
     async def close(self) -> None:
         self._closing = True
+        if self.download_session is not None:
+            self.download_session.cancel("程序正在关闭")
         await self.client.close()
         if self._handlers:
             await asyncio.gather(*self._handlers, return_exceptions=True)

@@ -9,6 +9,32 @@ from jm_bot.store import StateStore
 
 
 class StoreTests(unittest.TestCase):
+    def test_existing_state_adds_download_settings_without_rotating_login_tokens(self):
+        import json
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            original = StateStore(root, env={})
+            before = dict(original.state)
+            for key in ("download", "proxy", "proxy_control_token", "proxy_password"):
+                before.pop(key)
+            original.path.write_text(json.dumps(before), encoding="utf-8")
+            migrated = StateStore(root, env={})
+            self.assertEqual(migrated.state["onebot_token"], before["onebot_token"])
+            self.assertEqual(migrated.state["napcat_token"], before["napcat_token"])
+            self.assertEqual(migrated.get_download_settings()["mode"], "direct")
+            self.assertEqual(migrated.get_download_settings()["image_timeout"], 45)
+            self.assertEqual(StateStore(root, env={}).state, migrated.state)
+
+    def test_download_save_failure_preserves_active_and_persisted_settings(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = StateStore(Path(folder), env={})
+            original = store.get_download_settings()
+            with patch("jm_bot.store.atomic_json", side_effect=OSError("disk full")):
+                with self.assertRaises(OSError):
+                    store.save_download_settings({**original, "concurrency": 1})
+            self.assertEqual(store.get_download_settings(), original)
+            self.assertEqual(StateStore(Path(folder), env={}).get_download_settings(), original)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

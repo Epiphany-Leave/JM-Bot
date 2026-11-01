@@ -15,6 +15,9 @@ import qrcode.image.svg
 
 from .config import positive_id
 from .napcat import NapCatError
+from .proxy import ProxyError
+from .downloader import DownloadFailure
+from .download_settings import download_settings
 from .store import permissions
 
 
@@ -24,7 +27,7 @@ STATIC = Path(__file__).with_name("static")
 
 
 class Runtime:
-    def __init__(self, store, bot, napcat):
+    def __init__(self, store, bot, napcat, proxy=None):
         self.store, self.bot, self.napcat = store, bot, napcat
         self.qq = {}
         self.napcat_reachable = False
@@ -33,6 +36,9 @@ class Runtime:
         self.error = "正在启动 QQ 登录服务"
         self.next_step = "首次启动可能需要稍等，准备好后请前往 QQ 登录页面。"
         self._tasks = []
+        self.proxy = proxy
+        self.bot.download_options = store.get_download_settings
+        self.bot.proxy = proxy
 
     async def start(self):
         self._tasks = [asyncio.create_task(self.bot.client.run()), asyncio.create_task(self._monitor())]
@@ -103,11 +109,13 @@ class Runtime:
             error, next_step = "尚未设置使用权限", "请在使用权限页面勾选允许使用的群，或添加私聊用户。"
         value = {"ready": ready, "napcat_reachable": self.napcat_reachable,
                  "qq": self.qq, "onebot_connected": connected, "config_synced": self.config_synced,
-                 "busy": self.bot.busy, "current_task": self.bot.current_task,
+                 "busy": self.bot.busy, "current_task": self.bot.task_status(),
+                 "download_mode": self.store.get_download_settings()["mode"],
                  "last_result": self.bot.last_result, "error": error, "next_step": next_step}
         def redact(item):
             if isinstance(item, str):
                 for token in (self.store.state["onebot_token"], self.store.state["napcat_token"],
+                              self.store.state["proxy_control_token"], self.store.state["proxy_password"],
                               self.napcat.credential or ""):
                     if token:
                         item = item.replace(token, "[已隐藏]")
@@ -150,6 +158,10 @@ def create_app(runtime: Runtime, password: str, test_pdf: Path, *, manage_runtim
             response = web.json_response({"error": "设置格式无效，请检查 QQ 号、群号和必填项目"}, status=400)
         except NapCatError as exc:
             response = web.json_response({"error": str(exc), "next_step": "请查看概览和 QQ 登录页面的状态。"}, status=503)
+        except ProxyError as exc:
+            response = web.json_response({"error": str(exc), "next_step": "请在下载设置中检查 NAS 代理。"}, status=503)
+        except DownloadFailure as exc:
+            response = web.json_response({"error": exc.message, "code": exc.code}, status=503)
         except OSError:
             response = web.json_response({"error": "文件读写失败，请检查 NAS 项目目录权限及剩余空间"}, status=500)
         except web.HTTPException:
@@ -162,7 +174,7 @@ def create_app(runtime: Runtime, password: str, test_pdf: Path, *, manage_runtim
         response.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"
         return response
 
-    app = web.Application(middlewares=[protection], client_max_size=64 * 1024)
+    app = web.Application(middlewares=[protection], client_max_size=3 * 1024 * 1024)
     app[RUNTIME] = runtime
 
     async def login(request):
@@ -247,6 +259,61 @@ def create_app(runtime: Runtime, password: str, test_pdf: Path, *, manage_runtim
         result = await runtime.bot.send_test_file(body["kind"], body["target_id"], test_pdf)
         return web.json_response(result)
 
+    def idle_only():
+        if runtime.bot.busy:
+            raise web.HTTPConflict(text='{"error":"任务运行中，请结束后再修改下载或代理设置"}', content_type="application/json")
+
+    def require_proxy():
+        if runtime.proxy is None:
+            raise ProxyError("Mihomo 服务尚未配置，请使用包含三个容器的新版 Compose")
+        return runtime.proxy
+
+    async def get_download_settings(request):
+        return web.json_response(runtime.store.get_download_settings())
+
+    async def put_download_settings(request):
+        value = download_settings(await request.json())
+        idle_only()
+        async with runtime.bot._lock:
+            if value["mode"] == "mihomo":
+                async with asyncio.timeout(20):
+                    await require_proxy().ensure_ready()
+            return web.json_response(runtime.store.save_download_settings(value))
+
+    async def proxy_status(request):
+        if runtime.proxy is None:
+            return web.json_response({"available": False, "configured": False, "healthy": False,
+                                      "node": "", "nodes": [], "error": "NAS 代理尚未配置"})
+        return web.json_response(await runtime.proxy.status())
+
+    async def proxy_import(request):
+        body = await request.json()
+        if not isinstance(body, dict) or not set(body) <= {"url", "content"}:
+            raise ValueError("请填写订阅链接或上传配置文件")
+        idle_only()
+        async with runtime.bot._lock:
+            return web.json_response(await require_proxy().import_subscription(**body))
+
+    async def proxy_refresh(request):
+        idle_only()
+        async with runtime.bot._lock:
+            return web.json_response(await require_proxy().refresh_subscription())
+
+    async def proxy_node(request):
+        body = await request.json()
+        idle_only()
+        async with runtime.bot._lock:
+            return web.json_response(await require_proxy().select_node(body["name"]))
+
+    async def download_probe(request):
+        body = await request.json()
+        idle_only()
+        return web.json_response(await runtime.bot.detect_download(body["album_id"]))
+
+    async def cancel_task(request):
+        runtime.bot.stop_download()
+        return web.json_response({"ok": True, "message": "正在停止；在途请求结束后会清理并恢复空闲。"})
+
     async def index(request):
         return web.FileResponse(STATIC / "index.html")
 
@@ -269,6 +336,14 @@ def create_app(runtime: Runtime, password: str, test_pdf: Path, *, manage_runtim
     app.router.add_post("/api/qq/refresh", refresh_qr)
     app.router.add_get("/api/groups", groups)
     app.router.add_post("/api/test-file", test_file)
+    app.router.add_get("/api/download-settings", get_download_settings)
+    app.router.add_put("/api/download-settings", put_download_settings)
+    app.router.add_get("/api/proxy/status", proxy_status)
+    app.router.add_post("/api/proxy/import", proxy_import)
+    app.router.add_post("/api/proxy/refresh", proxy_refresh)
+    app.router.add_put("/api/proxy/node", proxy_node)
+    app.router.add_post("/api/download/test", download_probe)
+    app.router.add_post("/api/task/cancel", cancel_task)
     if manage_runtime:
         async def lifecycle(app):
             await runtime.start()

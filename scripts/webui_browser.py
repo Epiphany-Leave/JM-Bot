@@ -11,6 +11,109 @@ sys.path.insert(0, str(ROOT))
 from playwright.async_api import async_playwright, expect
 from tests.webui_fixture import PASSWORD, running_webui
 from tests.https_proxy import https_proxy
+from tests.webui_proxy_fixture import SUBSCRIPTION, local_download
+
+
+async def check_download_ui(page, runtime, peer, output):
+    await page.locator('[data-tab="download"]').click()
+    await expect(page.locator("#download-save")).to_be_enabled()
+    await expect(page.locator("#download-mode")).to_have_value("direct")
+    await expect(page.locator("#proxy-state")).to_contain_text("尚未导入")
+    assert await page.locator(".download-advanced").get_attribute("open") is None
+    assert await page.locator(".proxy-details").get_attribute("open") is None
+    saved = runtime.store.get_download_settings()
+    await page.locator(".download-advanced > summary").click()
+    await page.locator("#download-concurrency").fill("4")
+    await page.locator("#download-job_timeout").fill("31")
+    await page.wait_for_timeout(3200)
+    await expect(page.locator("#download-concurrency")).to_have_value("4")
+    await expect(page.locator("#download-unsaved")).to_be_visible()
+    assert runtime.store.get_download_settings() == saved
+    await page.locator("#download-reset").click()
+    await expect(page.locator("#download-job_timeout")).to_have_value("30")
+    assert runtime.store.get_download_settings() == saved
+    await page.locator("#download-job_timeout").fill("31")
+    await page.locator("#download-save").click()
+    await expect(page.locator("#download-feedback")).to_contain_text("已生效")
+    assert runtime.store.get_download_settings()["job_timeout"] == 1860
+    await page.locator("#download-reset").click()
+    await page.locator("#download-save").click()
+    await expect(page.locator("#download-feedback")).to_contain_text("已生效")
+    assert runtime.store.get_download_settings() == saved
+    await page.screenshot(path=output / "10-download-settings.png", full_page=True)
+
+    async with local_download() as download:
+        await page.locator(".proxy-details > summary").click()
+        await page.locator("#proxy-file").set_input_files({
+            "name": "local-nodes.yaml", "mimeType": "application/yaml", "buffer": SUBSCRIPTION.encode()})
+        await page.locator("#proxy-import").click()
+        await expect(page.locator("#proxy-state")).to_contain_text("连接正常")
+        assert runtime.store.state["proxy"]["node"] == "AUTO"
+        await expect(page.locator("#proxy-file")).to_have_value("")
+        await page.locator("#proxy-url").fill(download.base_url + "/subscription.yaml")
+        await page.locator("#proxy-import").click()
+        await expect(page.locator("#proxy-url")).to_have_value("")
+        await expect(page.locator("#proxy-import")).to_be_enabled()
+        await page.locator("#proxy-refresh").click()
+        await expect(page.locator("#proxy-feedback")).to_contain_text("已更新")
+        await page.locator("#proxy-node").select_option("beta")
+        await page.locator("#proxy-status-refresh").click()
+        await expect(page.locator("#proxy-status-refresh")).to_be_enabled()
+        await expect(page.locator("#proxy-node")).to_have_value("beta")
+        await page.locator("#proxy-choose").click()
+        await expect(page.locator("#proxy-feedback")).to_contain_text("已更新")
+        assert runtime.store.state["proxy"]["node"] == "beta"
+        await page.locator("#download-mode").select_option("mihomo")
+        await page.locator("#download-save").click()
+        await expect(page.locator("#download-feedback")).to_contain_text("已生效")
+        assert runtime.store.get_download_settings()["mode"] == "mihomo"
+        await expect(page.locator("#download-current-mode")).to_contain_text("NAS 独立代理")
+        await page.screenshot(path=output / "11-proxy.png", full_page=True)
+        await page.locator("#download-test-id").fill("90001")
+        await page.locator("#download-detect").click()
+        await expect(page.locator("#download-test-feedback")).to_contain_text("接口：通过；图片：通过")
+        assert download.image_reads == 1
+        assert download.sessions[0].settings["mode"] == "mihomo" and download.sessions[0].proxy_url
+        await expect(page.locator("#download-detect")).to_be_enabled()
+        await page.screenshot(path=output / "12-probe.png", full_page=True)
+
+        await peer.emit({"post_type": "message", "message_type": "group", "group_id": 20001,
+                         "user_id": 10001, "self_id": 99999, "message_id": 90002,
+                         "message": [{"type": "text", "data": {"text": "/jm 90002"}}]})
+        progress = page.locator("#tab-download [data-download-progress]")
+        stop = page.locator("#tab-download [data-cancel-download]")
+        await expect(progress).to_contain_text("1 / 1", timeout=8000)
+        await expect(progress).to_contain_text("local-image-fixture")
+        await expect(stop).to_be_enabled()
+        for control in ["download-save", "download-detect", "proxy-import", "proxy-refresh", "proxy-choose", "proxy-node"]:
+            await expect(page.locator("#" + control)).to_be_disabled()
+        await page.locator("#download-concurrency").fill("5")
+        uploads = len(peer.uploads)
+        await stop.click()
+        await expect(page.locator("#tab-download [data-cancel-feedback]")).to_contain_text("停止")
+        async with asyncio.timeout(5):
+            while not download.stop_seen.is_set():
+                await asyncio.sleep(0.02)
+        assert runtime.bot.busy, "cancel must not free slot before worker returns"
+        await expect(progress).to_contain_text("用户停止下载")
+        await page.screenshot(path=output / "13-stop.png", full_page=True)
+        download.release_stop.set()
+        async with asyncio.timeout(5):
+            while runtime.bot.busy:
+                await asyncio.sleep(0.02)
+        await expect(page.locator("#download-save")).to_be_enabled(timeout=8000)
+        await expect(stop).to_be_disabled()
+        await expect(page.locator("#download-concurrency")).to_have_value("5")
+        await expect(page.locator("#download-unsaved")).to_be_visible()
+        assert runtime.store.get_download_settings()["concurrency"] == 3
+        assert len(peer.uploads) == uploads
+        assert download.image_reads == 2
+        assert not list(runtime.bot.data_dir.glob("job_*"))
+        await page.set_viewport_size({"width": 390, "height": 844})
+        assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "download mobile overflow"
+        await page.screenshot(path=output / "14-mobile-download.png", full_page=True)
+        await page.set_viewport_size({"width": 1440, "height": 1080})
+    print("Download WebUI OK: persisted settings, polling-safe drafts, native YAML and URL import, refresh, node selection, local HTTP image probe, real bot cancellation and worker ownership, mobile")
 
 
 async def main(channel=None):
@@ -71,6 +174,7 @@ async def main(channel=None):
                     assert Path(peer.uploads[1]["file"]).is_file()
                     await expect(page.locator("#result-status")).to_have_text("文件已保留")
                     await page.screenshot(path=output / "06-retained.png", full_page=True)
+                    await check_download_ui(page, runtime, peer, output)
                     await page.set_viewport_size({"width": 390, "height": 844})
                     await page.locator('[data-tab="permissions"]').click()
                     await page.screenshot(path=output / "07-mobile.png", full_page=True)

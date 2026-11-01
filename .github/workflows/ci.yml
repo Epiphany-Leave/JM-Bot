@@ -50,6 +50,8 @@ jobs:
           docker image inspect jm-bot:ci --format 'platform={{.Os}}/{{.Architecture}} size_bytes={{.Size}}'
       - name: Check offline WebUI startup, authentication, persistence and idle RSS
         run: python scripts/container_smoke.py --image jm-bot:ci
+      - name: Check real Mihomo import, proxy routing, rollback and restart
+        run: python scripts/mihomo_smoke.py --image metacubex/mihomo:v1.19.33
       - name: Publish tested version to GHCR
         if: startsWith(github.ref, 'refs/tags/v')
         env:

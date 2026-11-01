@@ -109,8 +109,9 @@ class DownloadPdfTests(unittest.TestCase):
 
     def test_network_failure_is_not_reported_as_a_pdf(self):
         with patch.object(downloader.jmcomic, "download_album", side_effect=TimeoutError):
-            with self.assertRaises(TimeoutError):
+            with self.assertRaises(downloader.DownloadFailure) as caught:
                 downloader.download_pdf("11451", self.job)
+            self.assertEqual(caught.exception.code, "api_timeout")
         self.assertFalse(list(self.job.glob("*.pdf")))
 
     def test_real_http_transport_ignores_inherited_unreachable_proxy(self):
@@ -145,7 +146,7 @@ class DownloadPdfTests(unittest.TestCase):
         }
 
         def fetch(album_id, option, **kwargs):
-            transport = Postmans.create(data=option.client.postman.src_dict)
+            transport = downloader._postman(option, downloader.DownloadSession())
             response = transport.get(f"http://127.0.0.1:{server.server_port}/ping", timeout=2)
             self.assertEqual(response.content, b"direct-local-request")
             return self.result(option)

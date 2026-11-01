@@ -2,7 +2,7 @@ name: jm-bot
 
 services:
   jm-bot:
-    image: ghcr.io/epiphany-leave/jm-bot:1.1.0-rc.2
+    image: ghcr.io/epiphany-leave/jm-bot:1.1.0-rc.3
     platform: linux/amd64
     restart: unless-stopped
     environment:
@@ -15,6 +15,10 @@ services:
       - ./data:/data
       - ./napcat-config:/napcat-config
       - ./downloads:/downloads
+      - ./proxy-data:/proxy-data
+    networks:
+      - default
+      - proxy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3).read()"]
       interval: 10s
@@ -37,3 +41,20 @@ services:
       - ./napcat-config:/app/napcat/config
       - ./qq-data:/app/.config/QQ
       - ./downloads:/downloads:ro
+
+  mihomo:
+    image: metacubex/mihomo:v1.19.33
+    platform: linux/amd64
+    restart: unless-stopped
+    depends_on:
+      jm-bot:
+        condition: service_healthy
+    command: ["-d", "/proxy-data", "-f", "/proxy-data/config.yaml"]
+    volumes:
+      - ./proxy-data:/proxy-data
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    driver: bridge

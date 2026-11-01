@@ -3,16 +3,19 @@ import asyncio
 from contextlib import asynccontextmanager
 import hashlib
 import json
+import base64
 from pathlib import Path
 
 import aiohttp
 from aiohttp import web
 import pikepdf
 import websockets
+import yaml
 
 from jm_bot.bot import JMBot
 from jm_bot.config import Settings
 from jm_bot.napcat import NapCat
+from jm_bot.proxy import ManagedProxy
 from jm_bot.store import StateStore
 from jm_bot.web import Runtime, create_app
 
@@ -102,13 +105,54 @@ class MockQQ:
             await socket.send(json.dumps(event))
 
 
+class MockMihomo:
+    def __init__(self, store):
+        self.store = store
+        self.config = {}
+        self.selected = "REJECT"
+        self.fail_probe = False
+
+    async def http(self, request):
+        if request.path == "/generate_204":
+            expected = "Basic " + base64.b64encode(("jm:" + self.store.state["proxy_password"]).encode()).decode()
+            if request.headers.get("Proxy-Authorization") != expected:
+                return web.Response(status=407)
+            return web.Response(status=502 if self.fail_probe else 204)
+        if request.headers.get("Authorization") != "Bearer " + self.store.state["proxy_control_token"]:
+            return web.Response(status=401)
+        if request.path == "/version":
+            return web.json_response({"version": "mock-core"})
+        if request.path == "/configs":
+            self.config = yaml.safe_load((await request.json())["payload"])
+            self.selected = self.config["proxy-groups"][0]["proxies"][0]
+            return web.Response(status=204)
+        if request.path == "/providers/proxies/subscription":
+            item = self.config.get("proxy-providers", {}).get("subscription")
+            if not item:
+                return web.Response(status=404)
+            source = yaml.safe_load(Path(item["path"]).read_text(encoding="utf-8"))
+            nodes = [{"name": node["name"], "type": node["type"]} for node in source["proxies"]]
+            return web.json_response({"proxies": nodes})
+        if request.path == "/providers/proxies/subscription/healthcheck":
+            return web.Response(status=204)
+        if request.path == "/proxies/JM_PROXY":
+            if request.method == "PUT":
+                self.selected = (await request.json())["name"]
+                return web.Response(status=204)
+            return web.json_response({"now": self.selected})
+        return web.Response(status=404)
+
+
 @asynccontextmanager
 async def running_webui(directory):
     store = StateStore(directory / "data", env={})
     store.prepare_napcat(directory / "napcat-config")
     peer = MockQQ(store)
+    core = MockMihomo(store)
+    peer.proxy_core = core
     upstream = web.Application()
     upstream.router.add_post("/api/{path:.*}", peer.http)
+    upstream.router.add_route("*", "/{path:.*}", core.http)
     upstream_runner = web.AppRunner(upstream, access_log=None)
     await upstream_runner.setup()
     upstream_site = web.TCPSite(upstream_runner, "127.0.0.1", 0)
@@ -123,7 +167,12 @@ async def running_webui(directory):
                 bot = JMBot(settings)
                 napcat = NapCat(session, f"http://127.0.0.1:{http_port}", store.state["napcat_token"],
                                 store.state["onebot_token"], directory / "napcat-config")
-                runtime = Runtime(store, bot, napcat)
+                proxy = ManagedProxy(store, directory / "proxy-data", session,
+                                     api_url=f"http://127.0.0.1:{http_port}",
+                                     server_url=f"http://127.0.0.1:{http_port}",
+                                     test_url="http://probe.invalid/generate_204")
+                proxy.prepare()
+                runtime = Runtime(store, bot, napcat, proxy=proxy)
                 app = create_app(runtime, PASSWORD, ROOT / "samples" / "test.pdf")
                 runner = web.AppRunner(app, access_log=None)
                 await runner.setup()

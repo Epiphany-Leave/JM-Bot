@@ -7,5 +7,7 @@ napcat-config/
 qq-data/
 downloads/
 data/
+proxy-data/
+logs/
 .env
 dist/

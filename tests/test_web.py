@@ -138,7 +138,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         await self.login()
         await self.allow(groups=["20001"])
         entered, release = threading.Event(), threading.Event()
-        def slow_download(album, folder):
+        def slow_download(album, folder, *, session=None):
             entered.set()
             if not release.wait(5):
                 raise TimeoutError("test worker stalled")
