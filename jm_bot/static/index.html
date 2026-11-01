@@ -21,7 +21,7 @@
         <p id="login-error" class="feedback error" role="alert" hidden></p>
         <button class="primary full" type="submit">登录管理台 <span aria-hidden="true">→</span></button>
       </form>
-      <p class="login-note">使用部署时设置的管理密码。</p>
+      <p class="login-note">使用部署时设置的管理密码。<br><span data-app-version>正在读取版本…</span></p>
     </section>
   </main>
 
@@ -34,7 +34,7 @@
         <button class="nav-item" data-tab="permissions"><span aria-hidden="true">⊞</span> 使用权限</button>
         <button class="nav-item" data-tab="download"><span aria-hidden="true">↓</span> 下载设置</button>
       </nav>
-      <div class="sidebar-bottom"><span class="local-note"><i aria-hidden="true"></i> 你的 NAS · 自己管理</span><button id="logout" class="text-button">退出登录</button></div>
+      <div class="sidebar-bottom"><span class="local-note"><i aria-hidden="true"></i> 自己部署 · 自己管理</span><span class="local-note" data-app-version>正在读取版本…</span><button id="logout" class="text-button">退出登录</button></div>
     </aside>
 
     <main class="main-content">
@@ -57,13 +57,13 @@
             <form id="test-form"><label for="test-target">接收位置</label><select id="test-target" required><option value="">请先设置使用权限</option></select><button id="test-submit" class="primary" type="submit" disabled>发送测试文件</button></form>
             <p id="test-feedback" class="feedback" role="status" hidden></p>
           </article>
-          <article class="card"><div class="section-heading"><div><p class="eyebrow">最近一次</p><h2>任务结果</h2></div></div><div id="result-empty" class="empty-state"><span aria-hidden="true">▤</span><p>还没有任务结果</p><small>发送指令后，可以在这里查看处理情况。</small></div><div id="result-content" hidden><span id="result-status" class="pill neutral"></span><p id="result-message" class="result-message"></p><div id="retained-file" class="path-box" hidden><span>NAS 保留文件</span><code id="result-path"></code><small>请先检查 QQ 是否已收到文件，再决定是否重新操作。</small></div></div></article>
+          <article class="card"><div class="section-heading"><div><p class="eyebrow">最近一次</p><h2>任务结果</h2></div></div><div id="result-empty" class="empty-state"><span aria-hidden="true">▤</span><p>还没有任务结果</p><small>发送指令后，可以在这里查看处理情况。</small></div><div id="result-content" hidden><span id="result-status" class="pill neutral"></span><p id="result-message" class="result-message"></p><div id="retained-file" class="path-box" hidden><span>项目目录中的保留文件</span><code id="result-path"></code><small>请先检查 QQ 是否已收到文件，再决定是否重新操作。</small></div></div></article>
         </div>
         <aside class="instruction-strip"><strong>开始使用</strong><p>在已授权的 QQ 私聊或群聊中发送 <code>/jm &lt;本子 ID&gt;</code>，机器人会下载整本并回传 PDF。</p></aside>
       </section>
 
       <section id="tab-qq" class="tab-panel" hidden aria-labelledby="page-title">
-        <div class="qq-grid"><article class="card qr-card"><p class="eyebrow">连接你的 QQ</p><h2 id="qr-title">扫码登录</h2><p id="qr-hint" class="muted">使用手机 QQ 扫描二维码，并在手机上确认。</p><div id="qr-frame" class="qr-frame"><img id="qr-image" alt="QQ 登录二维码" hidden><div id="qr-placeholder" class="qr-placeholder">正在获取登录状态…</div></div><button id="refresh-qr" class="secondary">刷新二维码</button><p id="qr-feedback" class="feedback" role="status" hidden></p></article><article class="card steps-card"><h2>只需连接一次</h2><ol class="steps"><li><span>1</span><div><strong>打开手机 QQ</strong><p>使用准备作为机器人的 QQ 账号扫码。</p></div></li><li><span>2</span><div><strong>在手机上确认登录</strong><p>如果 QQ 要求验证，请按手机提示完成。</p></div></li><li><span>3</span><div><strong>设置使用权限</strong><p>选择允许使用的群聊，并添加私聊用户。</p></div></li></ol><div class="soft-note">登录状态会保存在 NAS 中。二维码失效时，点击刷新即可。</div><button id="go-permissions" class="text-button">前往设置使用权限 →</button></article></div>
+        <div class="qq-grid"><article class="card qr-card"><p class="eyebrow">连接你的 QQ</p><h2 id="qr-title">扫码登录</h2><p id="qr-hint" class="muted">使用手机 QQ 扫描二维码，并在手机上确认。</p><div id="qr-frame" class="qr-frame"><img id="qr-image" alt="QQ 登录二维码" hidden><div id="qr-placeholder" class="qr-placeholder">正在获取登录状态…</div></div><button id="refresh-qr" class="secondary">刷新二维码</button><p id="qr-feedback" class="feedback" role="status" hidden></p></article><article class="card steps-card"><h2>只需连接一次</h2><ol class="steps"><li><span>1</span><div><strong>打开手机 QQ</strong><p>使用准备作为机器人的 QQ 账号扫码。</p></div></li><li><span>2</span><div><strong>在手机上确认登录</strong><p>如果 QQ 要求验证，请按手机提示完成。</p></div></li><li><span>3</span><div><strong>设置使用权限</strong><p>选择允许使用的群聊，并添加私聊用户。</p></div></li></ol><div class="soft-note">登录状态会保存在项目目录中。二维码失效时，点击刷新即可。</div><button id="go-permissions" class="text-button">前往设置使用权限 →</button></article></div>
       </section>
 
       <section id="tab-permissions" class="tab-panel" hidden aria-labelledby="page-title">
@@ -80,7 +80,7 @@
         <div class="section-intro"><div><h2>下载设置</h2><p class="muted">推荐先用直连。修改设置后，请点击保存。</p></div><span id="download-unsaved" class="pill amber" hidden>有未保存的修改</span></div>
         <article class="card download-progress" aria-label="当前下载进度"><h2>当前下载</h2><p data-download-progress class="result-message" role="status">暂无下载任务</p><button data-cancel-download class="secondary" type="button" disabled>停止下载</button><p class="field-note">停止后需等待正在执行的下载线程结束，才可开始下一项任务。上传、测试 PDF 和配置任务不能在这里停止。</p><p data-cancel-feedback class="feedback" role="status" hidden></p></article>
         <form id="download-form">
-          <article class="card permission-card"><h2>下载线路</h2><label for="download-mode">使用方式</label><select id="download-mode"><option value="direct">直连（推荐）</option><option value="mihomo">NAS 独立代理</option></select><p id="download-current-mode" class="field-note">正在读取已生效的线路…</p><p id="download-busy-note" class="soft-note" hidden>正在处理任务，请等待结束后再保存设置或操作代理。</p>
+          <article class="card permission-card"><h2>下载线路</h2><label for="download-mode">使用方式</label><select id="download-mode"><option value="direct">直连（推荐）</option><option value="mihomo">内置代理</option></select><p id="download-current-mode" class="field-note">正在读取已生效的线路…</p><p id="download-busy-note" class="soft-note" hidden>正在处理任务，请等待结束后再保存设置或操作代理。</p>
           <details class="download-advanced"><summary>高级下载设置</summary><div class="settings-grid">
             <div><label for="download-concurrency">并发（1–5）</label><input id="download-concurrency" type="number" min="1" max="5" step="1" required value="3"></div>
             <div><label for="download-connect_timeout">连接等待（秒）</label><input id="download-connect_timeout" type="number" min="1" max="60" step="1" required value="8"></div>
@@ -92,9 +92,9 @@
           <div class="save-bar download-save"><p id="download-feedback" class="feedback" role="status" hidden></p><button id="download-save" class="primary" type="submit" disabled>保存下载设置</button></div></article>
         </form>
         <article class="card permission-card"><h2>检测下载线路</h2><p class="muted">使用已保存的线路，检查接口和一张图片能否下载。不会下载整本，也不会发送到 QQ。</p><form id="download-test-form"><label for="download-test-id">测试本子 ID</label><div class="inline-form"><input id="download-test-id" type="text" inputmode="numeric" pattern="[0-9]*[1-9][0-9]*" required placeholder="填写正整数 ID"><button id="download-detect" class="secondary" type="submit" disabled>检测下载线路</button></div></form><p id="download-test-feedback" class="feedback" role="status" hidden></p></article>
-        <details class="card permission-card proxy-details"><summary>NAS 独立代理</summary><p class="muted">代理运行在 NAS 上，不依赖电脑。支持导入 YAML 配置或节点订阅；只提取可用节点，不套用文件中的 TUN、端口或规则。并非所有 VPN 配置都支持。</p><p id="proxy-state" class="soft-note" role="status">正在读取代理状态…</p>
+        <details class="card permission-card proxy-details"><summary>内置代理</summary><p class="muted">代理与机器人一起运行在宿主机上。支持导入 YAML 配置或节点订阅；只提取可用节点，不套用文件中的 TUN、端口或规则。并非所有 VPN 配置都支持。</p><p id="proxy-state" class="soft-note" role="status">正在读取代理状态…</p>
           <form id="proxy-import-form"><label for="proxy-url">订阅链接</label><input id="proxy-url" type="password" autocomplete="off" spellcheck="false" placeholder="https://…"><label for="proxy-file">或选择配置文件（.yaml / .yml / .txt，最多 2 MiB）</label><input id="proxy-file" type="file" accept=".yaml,.yml,.txt"><p class="field-note">链接和文件请选择一种。导入成功后会清空链接。</p><button id="proxy-import" class="secondary" type="submit" disabled>导入节点</button></form>
-          <div class="inline-form proxy-controls"><div><label for="proxy-node">使用节点</label><select id="proxy-node" disabled><option value="AUTO">自动</option></select></div><button id="proxy-choose" class="secondary" type="button" disabled>选择节点</button><button id="proxy-refresh" class="secondary" type="button" disabled>刷新节点</button><button id="proxy-status-refresh" class="text-button" type="button">刷新状态</button></div><p class="field-note">导入时会测试代理连接。连接正常后，选择“NAS 独立代理”并保存，再用上方检测确认下载线路。</p><p id="proxy-feedback" class="feedback" role="status" hidden></p>
+          <div class="inline-form proxy-controls"><div><label for="proxy-node">使用节点</label><select id="proxy-node" disabled><option value="AUTO">自动</option></select></div><button id="proxy-choose" class="secondary" type="button" disabled>选择节点</button><button id="proxy-refresh" class="secondary" type="button" disabled>刷新节点</button><button id="proxy-status-refresh" class="text-button" type="button">刷新状态</button></div><p class="field-note">导入时会测试代理连接。连接正常后，选择“内置代理”并保存，再用上方检测确认下载线路。</p><p id="proxy-feedback" class="feedback" role="status" hidden></p>
         </details>
       </section>
       <footer class="page-footer">简单连接，按需使用。<span>状态每 3 秒自动更新</span></footer>

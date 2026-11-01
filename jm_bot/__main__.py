@@ -49,7 +49,7 @@ async def serve() -> None:
         try:
             await web.TCPSite(runner, os.environ.get("WEB_HOST", "0.0.0.0"),
                               int(os.environ.get("WEB_PORT", "8080"))).start()
-            logging.info("JM-Bot %s 管理网页已启动；打开 http://NAS地址:16099（端口以 Compose 为准）", __version__)
+            logging.info("JM-Bot %s 管理网页已启动；打开 http://宿主机地址:16099（端口以 Compose 为准）", __version__)
             await stop.wait()
         finally:
             await runner.cleanup()

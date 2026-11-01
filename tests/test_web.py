@@ -8,6 +8,8 @@ from unittest.mock import patch
 import aiohttp
 
 from jm_bot.store import StateStore
+from jm_bot import __version__
+from jm_bot.proxy import ProxyError
 from tests.test_bot import event, make_pdf
 from tests.webui_fixture import running_webui, PASSWORD
 
@@ -39,6 +41,12 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
     async def test_auth_rate_limit_source_check_logout_and_health_without_qq(self):
         response = await self.session.get(self.url + "/healthz")
         self.assertEqual(response.status, 200)
+        self.assertEqual(await response.json(), {"ok": True, "service": "jm-bot", "version": __version__})
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        text = await response.text()
+        for key in ("onebot_token", "napcat_token", "proxy_password", "proxy_control_token"):
+            self.assertNotIn(self.runtime.store.state[key], text)
+        self.assertNotIn(PASSWORD, text)
         response = await self.session.get(self.url + "/api/auth/session")
         self.assertFalse((await response.json())["authenticated"])
         self.assertEqual((await self.session.get(self.url + "/api/permissions")).status, 401)
@@ -50,6 +58,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         response = await self.session.get(self.url + "/api/auth/session")
         self.assertTrue((await response.json())["authenticated"])
         response = await self.session.get(self.url + "/api/status")
+        self.assertEqual((await response.json())["version"], __version__)
         text = await response.text()
         self.assertNotIn(self.runtime.store.state["onebot_token"], text)
         self.assertNotIn(self.runtime.store.state["napcat_token"], text)
@@ -61,6 +70,23 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status, 401)
         response = await self.session.post(self.url + "/api/auth/login", json={"password": PASSWORD})
         self.assertEqual(response.status, 429)
+
+    async def test_proxy_error_metadata_is_safe_and_optional_http_status(self):
+        await self.login()
+        for http_status in (None, 403):
+            error = ProxyError("订阅下载失败", code="subscription_http", stage="subscription_fetch_direct",
+                               next_step="请检查订阅或上传文件。", http_status=http_status)
+            with patch.object(self.runtime.proxy, "import_subscription", side_effect=error):
+                response = await self.session.post(self.url + "/api/proxy/import", json={"url": "https://private.invalid/TOKEN"})
+            self.assertEqual(response.status, 503)
+            payload = await response.json()
+            self.assertEqual(payload["error"], "订阅下载失败")
+            self.assertEqual(payload["next_step"], error.next_step)
+            self.assertEqual(payload["code"], error.code)
+            self.assertEqual(payload["stage"], error.stage)
+            self.assertNotIn("TOKEN", await response.text())
+            self.assertEqual(payload.get("http_status"), http_status)
+            self.assertEqual("http_status" in payload, http_status is not None)
 
     async def test_qr_groups_live_permissions_and_persisted_restart(self):
         await self.login()

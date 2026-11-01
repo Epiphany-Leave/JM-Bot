@@ -14,6 +14,7 @@ import qrcode
 import qrcode.image.svg
 
 from .config import positive_id
+from . import __version__
 from .napcat import NapCatError
 from .proxy import ProxyError
 from .downloader import DownloadFailure
@@ -107,7 +108,7 @@ class Runtime:
         if ready and not (allowed["allowed_users"] or (allowed["allowed_groups"] and allowed["group_allow_all"])):
             ready = False
             error, next_step = "尚未设置使用权限", "请在使用权限页面勾选允许使用的群，或添加私聊用户。"
-        value = {"ready": ready, "napcat_reachable": self.napcat_reachable,
+        value = {"version": __version__, "ready": ready, "napcat_reachable": self.napcat_reachable,
                  "qq": self.qq, "onebot_connected": connected, "config_synced": self.config_synced,
                  "busy": self.bot.busy, "current_task": self.bot.task_status(),
                  "download_mode": self.store.get_download_settings()["mode"],
@@ -139,7 +140,7 @@ def create_app(runtime: Runtime, password: str, test_pdf: Path, *, manage_runtim
             origin = request.headers.get("Origin")
             allowed_origins = {f"{request.scheme}://{request.host}"}
             if request.scheme == "http":
-                # A NAS gateway terminates TLS while preserving the external Host.
+                # A gateway terminates TLS while preserving the external Host.
                 allowed_origins.add(f"https://{request.host}")
             if (origin and origin not in allowed_origins) or request.headers.get("Sec-Fetch-Site") == "cross-site":
                 return web.json_response({"error": "请求来源不匹配，请直接打开管理网页重试"}, status=403)
@@ -159,19 +160,24 @@ def create_app(runtime: Runtime, password: str, test_pdf: Path, *, manage_runtim
         except NapCatError as exc:
             response = web.json_response({"error": str(exc), "next_step": "请查看概览和 QQ 登录页面的状态。"}, status=503)
         except ProxyError as exc:
-            response = web.json_response({"error": str(exc), "next_step": "请在下载设置中检查 NAS 代理。"}, status=503)
+            payload = {"error": str(exc), "next_step": exc.next_step, "code": exc.code, "stage": exc.stage}
+            if exc.http_status is not None:
+                payload["http_status"] = exc.http_status
+            response = web.json_response(payload, status=503)
         except DownloadFailure as exc:
             response = web.json_response({"error": exc.message, "code": exc.code}, status=503)
         except OSError:
-            response = web.json_response({"error": "文件读写失败，请检查 NAS 项目目录权限及剩余空间"}, status=500)
-        except web.HTTPException:
-            raise
+            response = web.json_response({"error": "文件读写失败，请检查项目目录权限及剩余空间"}, status=500)
+        except web.HTTPException as exc:
+            response = exc
         except Exception as exc:
             log.error("Management request failed (%s)", type(exc).__name__)
             response = web.json_response({"error": "操作暂未完成，请检查连接状态后重试"}, status=503)
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+        if isinstance(response, web.HTTPException):
+            raise response
         return response
 
     app = web.Application(middlewares=[protection], client_max_size=3 * 1024 * 1024)
@@ -217,7 +223,7 @@ def create_app(runtime: Runtime, password: str, test_pdf: Path, *, manage_runtim
         return web.json_response({"authenticated": authenticated})
 
     async def health(request):
-        return web.json_response({"ok": True})
+        return web.json_response({"ok": True, "service": "jm-bot", "version": __version__})
 
     async def favicon(request):
         return web.Response(status=204)
@@ -283,7 +289,7 @@ def create_app(runtime: Runtime, password: str, test_pdf: Path, *, manage_runtim
     async def proxy_status(request):
         if runtime.proxy is None:
             return web.json_response({"available": False, "configured": False, "healthy": False,
-                                      "node": "", "nodes": [], "error": "NAS 代理尚未配置"})
+                                      "node": "", "nodes": [], "error": "内置代理尚未配置"})
         return web.json_response(await runtime.proxy.status())
 
     async def proxy_import(request):

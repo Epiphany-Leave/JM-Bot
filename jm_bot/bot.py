@@ -79,13 +79,13 @@ class JMBot:
         proxy_url = None
         if options["mode"] == "mihomo":
             if self.proxy is None:
-                raise DownloadFailure("proxy_unavailable", "NAS 代理未就绪，请先导入订阅并测试连接。")
+                raise DownloadFailure("proxy_unavailable", "内置代理未就绪，请先导入订阅并测试连接。")
             try:
                 async with asyncio.timeout(20):
                     await self.proxy.ensure_ready()
                 proxy_url = self.proxy.proxy_url
             except (ProxyError, TimeoutError):
-                raise DownloadFailure("proxy_unavailable", "NAS 代理连接验证失败，请在下载设置中检查节点。") from None
+                raise DownloadFailure("proxy_unavailable", "内置代理连接验证失败，请在下载设置中检查节点。") from None
         return DownloadSession(options, proxy_url=proxy_url)
 
     async def _download_worker(self, function, album_id, job):
@@ -248,7 +248,7 @@ class JMBot:
             self.last_result = {"status": "retained", "message": "PDF 已生成；若连接中断或发送结果不明，将保留文件。",
                                 "path": f"downloads/{job.name}/{pdf.name}"}
             if not self._available(generation):
-                self.last_result["message"] = "任务期间连接中断，未自动补发；请从 NAS 取回 PDF。"
+                self.last_result["message"] = "任务期间连接中断，未自动补发；请从项目目录取回 PDF。"
                 log.warning("连接已变化，不自动上传；PDF 保留于 %s", pdf)
                 return
             try:
@@ -260,7 +260,7 @@ class JMBot:
                 self.last_result["message"] = "发送结果未确认；请先检查 QQ，避免重复发送。PDF 已保留。"
                 await self._reply(target, generation,
                                   "PDF 发送结果未确认，请先检查 QQ，避免重复发送。\n"
-                                  f"PDF 已保留，NAS 文件（相对项目目录）：downloads/{job.name}/{pdf.name}")
+                                  f"PDF 已保留，项目目录中的文件位置：downloads/{job.name}/{pdf.name}")
                 return
             retain_pdf = False
             self.last_result = {"status": "success", "message": f"JM {album_id} PDF 已上传，临时文件已清理。"}
@@ -274,7 +274,7 @@ class JMBot:
                 except OSError:
                     log.exception("临时文件清理失败：%s", job)
                     if self.last_result is not None:
-                        self.last_result["message"] += " 临时文件清理失败，请从 NAS 检查残留文件。"
+                        self.last_result["message"] += " 临时文件清理失败，请在项目目录检查残留文件。"
                         if (job / f"jm_{album_id}.pdf").exists():
                             self.last_result["path"] = f"downloads/{job.name}/jm_{album_id}.pdf"
 
@@ -318,7 +318,7 @@ class JMBot:
                     try:
                         await asyncio.to_thread(shutil.rmtree, job)
                     except OSError:
-                        self.last_result["message"] += " 临时文件清理失败，请在 NAS 检查残留。"
+                        self.last_result["message"] += " 临时文件清理失败，请在项目目录检查残留。"
                         if pdf.exists():
                             self.last_result["path"] = f"downloads/{job.name}/{pdf.name}"
 

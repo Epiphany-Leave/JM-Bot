@@ -80,9 +80,24 @@ class ProxyLoginTests(unittest.IsolatedAsyncioTestCase):
     async def test_legacy_bookmarks_redirect_to_management_page(self):
         for path in ("/webui", "/webui/", "/webui/web_login"):
             with self.subTest(path=path):
+                redirect = await self.session.get(self.url + path, allow_redirects=False)
+                self.assertEqual(redirect.status, 302)
+                self.assertEqual(redirect.headers["Location"], "/")
+                self.assertEqual(redirect.headers["Cache-Control"], "no-store")
+                self.assertEqual(redirect.headers["X-Content-Type-Options"], "nosniff")
                 response = await self.session.get(self.url + path)
                 self.assertEqual(response.status, 200)
                 self.assertTrue(response.history)
                 self.assertEqual(response.history[0].headers["Location"], "/")
                 self.assertEqual(response.url.path, "/")
                 self.assertIn('id="login-view"', await response.text())
+
+    async def test_root_and_permissions_deep_link_use_same_public_shell(self):
+        for path in ("/", "/#permissions"):
+            response = await self.session.get(self.url + path)
+            self.assertEqual(response.status, 200)
+            text = await response.text()
+            self.assertIn('id="login-view"', text)
+            self.assertIn('data-app-version', text)
+            self.assertNotIn("jm_check=rc2", text)
+            self.assertNotIn(PASSWORD, text)

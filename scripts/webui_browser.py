@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from playwright.async_api import async_playwright, expect
+from jm_bot import __version__
 from tests.webui_fixture import PASSWORD, running_webui
 from tests.https_proxy import https_proxy
 from tests.webui_proxy_fixture import SUBSCRIPTION, local_download
@@ -44,6 +45,17 @@ async def check_download_ui(page, runtime, peer, output):
 
     async with local_download() as download:
         await page.locator(".proxy-details > summary").click()
+        async with page.expect_response(lambda response: response.url.endswith('/api/proxy/import') and response.status == 503) as failure:
+            await page.locator("#proxy-file").set_input_files({
+                "name": "invalid.yaml", "mimeType": "application/yaml", "buffer": b'<html>PRIVATE_SUBSCRIPTION</html>'})
+            await page.locator("#proxy-import").click()
+        payload = await (await failure.value).json()
+        assert payload['code'] == 'subscription_html' and payload['stage'] == 'subscription_validate'
+        await expect(page.locator("#proxy-feedback")).to_contain_text(payload['error'])
+        await expect(page.locator("#proxy-feedback")).to_contain_text(payload['next_step'])
+        assert 'PRIVATE_SUBSCRIPTION' not in await page.locator("#proxy-feedback").inner_text()
+        assert not runtime.store.state.get('proxy', {}).get('provider')
+        await page.screenshot(path=output / "15-subscription-safe-error.png", full_page=True)
         await page.locator("#proxy-file").set_input_files({
             "name": "local-nodes.yaml", "mimeType": "application/yaml", "buffer": SUBSCRIPTION.encode()})
         await page.locator("#proxy-import").click()
@@ -67,7 +79,7 @@ async def check_download_ui(page, runtime, peer, output):
         await page.locator("#download-save").click()
         await expect(page.locator("#download-feedback")).to_contain_text("已生效")
         assert runtime.store.get_download_settings()["mode"] == "mihomo"
-        await expect(page.locator("#download-current-mode")).to_contain_text("NAS 独立代理")
+        await expect(page.locator("#download-current-mode")).to_contain_text("内置代理")
         await page.screenshot(path=output / "11-proxy.png", full_page=True)
         await page.locator("#download-test-id").fill("90001")
         await page.locator("#download-detect").click()
@@ -127,14 +139,26 @@ async def main(channel=None):
                 try:
                     page = await browser.new_page(viewport={"width": 1440, "height": 1080}, device_scale_factor=1)
                     errors = []
+                    expected_http_errors = []
                     page.on("pageerror", lambda error: errors.append(str(error)))
-                    page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+                    def console_message(message):
+                        if message.type != "error":
+                            return
+                        if message.text == "Failed to load resource: the server responded with a status of 503 (Service Unavailable)" and message.location.get('url', '').endswith('/api/proxy/import'):
+                            expected_http_errors.append(message.text)
+                        else:
+                            errors.append(message.text)
+                    page.on("console", console_message)
                     await page.goto(url)
                     await expect(page.locator("#login-view")).to_be_visible()
+                    await expect(page.locator('#login-view [data-app-version]')).to_have_text(f'JM-Bot {__version__}')
+                    assert 'jm_check=' not in page.url
                     await page.screenshot(path=output / "01-login.png", full_page=True)
                     await page.locator("#password").fill(PASSWORD)
                     await page.get_by_role("button", name="登录管理台").click()
                     await expect(page.locator("#app-view")).to_be_visible()
+                    await expect(page.locator('#app-view [data-app-version]')).to_have_text(f'JM-Bot {__version__}')
+                    await expect(page.locator('#tab-overview')).to_be_visible()
                     await expect(page.locator("#ready-title")).to_contain_text("还差一步")
                     await page.screenshot(path=output / "02-waiting.png", full_page=True)
                     await page.locator('[data-tab="qq"]').click()
@@ -176,6 +200,7 @@ async def main(channel=None):
                     await expect(page.locator("#result-status")).to_have_text("文件已保留")
                     await page.screenshot(path=output / "06-retained.png", full_page=True)
                     await check_download_ui(page, runtime, peer, output)
+                    assert len(expected_http_errors) == 1, expected_http_errors
                     await page.set_viewport_size({"width": 390, "height": 844})
                     await page.locator('[data-tab="permissions"]').click()
                     await page.screenshot(path=output / "07-mobile.png", full_page=True)
@@ -183,11 +208,13 @@ async def main(channel=None):
                     await page.reload()
                     await expect(page.locator("#app-view")).to_be_visible()
                     await expect(page.locator("#allowed-users")).to_have_value("10001")
+                    await expect(page.locator("#save-permissions")).to_be_enabled()
+                    await expect(page.locator("#download-save")).to_be_enabled()
                     await page.locator("#logout").click()
                     await expect(page.locator("#login-view")).to_be_visible()
                     await page.screenshot(path=output / "08-logout.png", full_page=True)
                     assert not errors, "Browser errors: " + " | ".join(errors)
-                    print("WebUI browser flow OK: login, QR, group permissions, unsaved edits, PDF ack/retention, mobile, session/logout; console errors=0")
+                    print("WebUI browser flow OK: dynamic public/version, login, QR, group permissions, unsaved edits, PDF ack/retention, safe subscription failure, mobile, session/logout; unexpected console errors=0; expected HTTP 503 diagnostic=1")
                     print(f"Screenshots: {output}")
                     async with https_proxy(url, Path(folder)) as proxy_url:
                         context = await browser.new_context(ignore_https_errors=True)
@@ -196,11 +223,19 @@ async def main(channel=None):
                             proxy_errors = []
                             proxy_page.on("pageerror", lambda error: proxy_errors.append(str(error)))
                             proxy_page.on("console", lambda message: proxy_errors.append(message.text) if message.type == "error" else None)
+                            for legacy in ('/webui', '/webui/', '/webui/web_login'):
+                                redirect = await context.request.get(proxy_url + legacy, max_redirects=0)
+                                assert redirect.status == 302 and redirect.headers['location'] == '/'
+                                assert redirect.headers['cache-control'] == 'no-store'
                             await proxy_page.goto(proxy_url + "/webui/web_login")
                             assert proxy_page.url.split("#", 1)[0] == proxy_url + "/"
+                            await expect(proxy_page.locator('#login-view [data-app-version]')).to_have_text(f'JM-Bot {__version__}')
+                            await proxy_page.goto(proxy_url + '/#permissions')
                             await proxy_page.locator("#password").fill(PASSWORD)
                             await proxy_page.get_by_role("button", name="登录管理台").click()
                             await expect(proxy_page.locator("#app-view")).to_be_visible()
+                            await expect(proxy_page.locator('#tab-permissions')).to_be_visible()
+                            assert proxy_page.url == proxy_url + '/#permissions'
                             cookie = next(cookie for cookie in await context.cookies() if cookie["name"] == "jm_session")
                             assert cookie["secure"] and cookie["httpOnly"] and cookie["sameSite"] == "Strict"
                             await proxy_page.locator('[data-tab="permissions"]').click()
@@ -212,6 +247,8 @@ async def main(channel=None):
                             await proxy_page.screenshot(path=output / "09-https-proxy.png", full_page=True)
                             await proxy_page.reload()
                             await expect(proxy_page.locator("#app-view")).to_be_visible()
+                            await expect(proxy_page.locator("#save-permissions")).to_be_enabled()
+                            await expect(proxy_page.locator("#download-save")).to_be_enabled()
                             await proxy_page.locator("#logout").click()
                             await expect(proxy_page.locator("#login-view")).to_be_visible()
                             assert not proxy_errors, "HTTPS proxy browser errors: " + " | ".join(proxy_errors)

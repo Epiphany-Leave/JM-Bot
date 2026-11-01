@@ -2,7 +2,7 @@ name: jm-bot
 
 services:
   jm-bot:
-    image: ghcr.io/epiphany-leave/jm-bot:1.1.0-rc.3
+    image: ghcr.io/epiphany-leave/jm-bot:1.1.0-rc.4
     platform: linux/amd64
     restart: unless-stopped
     environment:
@@ -12,6 +12,7 @@ services:
     ports:
       - "16099:8080"
     volumes:
+      # 缺失的相对目录由 Compose 自动创建，无需手动新建；已有目录直接复用。
       - ./data:/data
       - ./napcat-config:/napcat-config
       - ./downloads:/downloads

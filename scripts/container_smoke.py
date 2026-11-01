@@ -1,4 +1,8 @@
-"""Linux/Docker smoke check of the finished WebUI image, with no NapCat or QQ login."""
+"""Check the image and Compose's directory creation without a real QQ login.
+
+NapCat and Mihomo are replaced only here by short-lived filesystem checkers;
+the separate mihomo_smoke.py runs the real core.
+"""
 
 import argparse
 import asyncio
@@ -56,11 +60,44 @@ async def smoke(image: str) -> None:
     with tempfile.TemporaryDirectory(prefix="jm-bot-smoke-") as directory:
         root = Path(directory).resolve()
         root.chmod(0o755)
+        folders = ("data", "napcat-config", "downloads", "proxy-data", "qq-data")
         mounts = []
-        for folder in ("data", "napcat-config", "downloads", "proxy-data"):
-            path = root / folder
-            path.mkdir(mode=0o755)
-            mounts.extend(("--mount", f"type=bind,src={path},dst=/{folder}"))
+        for folder in folders:
+            mounts.extend(("--volume", f"{root / folder}:/{folder}"))
+        canonical = Path(__file__).resolve().parents[1] / "compose.yaml"
+        config = json.loads(await docker("compose", "--project-directory", str(root),
+                                        "--project-name", name, "-f", str(canonical),
+                                        "config", "--format", "json"))
+        sources = {Path(mount["source"]).resolve() for service in config["services"].values()
+                   for mount in service.get("volumes", []) if mount["type"] == "bind"}
+        assert sources == {root / folder for folder in folders}, "Compose mounts escaped the temporary project"
+        assert all(network.get("name", "").startswith(name + "_") for network in config["networks"].values())
+        for service in config["services"].values():
+            service["image"] = image
+            service["restart"] = "no"
+        main_service = config["services"]["jm-bot"]
+        main_service["container_name"] = name
+        main_service["environment"]["ADMIN_PASSWORD"] = password
+        main_service["ports"] = ["127.0.0.1::8080"]
+        main_service["healthcheck"].update(interval="1s", start_period="1s")
+        napcat = config["services"]["napcat"]
+        napcat["entrypoint"] = ["python", "-c"]
+        napcat["command"] = [(
+            "from pathlib import Path; "
+            "p=Path('/app/.config/QQ/compose-check'); "
+            "p.exists() or p.write_text('preserved'); "
+            "assert p.read_text() == 'preserved'; "
+            "assert Path('/app/napcat/config/webui.json').is_file()"
+        )]
+        mihomo = config["services"]["mihomo"]
+        mihomo["entrypoint"] = ["python", "-c"]
+        mihomo["command"] = ["from pathlib import Path; assert Path('/proxy-data/config.yaml').is_file()"]
+        compose_file = root / "compose.json"
+        compose_file.write_text(json.dumps(config), encoding="utf-8")
+        compose_file.chmod(0o600)
+        compose_args = ("compose", "--project-name", name, "-f", str(compose_file))
+        await docker(*compose_args, "config", "--quiet")
+        assert not any((root / folder).exists() for folder in folders)
         state_check = (
             "import hashlib, json; from pathlib import Path\n"
             "state_path = Path('/data/config.json')\n"
@@ -77,17 +114,18 @@ async def smoke(image: str) -> None:
         )
 
         async def start():
-            await docker(
-                "run", "--detach", "--name", name,
-                "--publish", "127.0.0.1::8080", *mounts,
-                "--env", f"ADMIN_PASSWORD={password}", image,
-            )
+            await docker(*compose_args, "up", "--detach")
+            checkers = (await docker(*compose_args, "ps", "--all", "--quiet", "napcat", "mihomo")).splitlines()
+            assert len(checkers) == 2
+            assert all(code == "0" for code in (await docker("wait", *checkers)).splitlines())
+            assert all((root / folder).is_dir() for folder in folders)
             port = (await docker("port", name, "8080/tcp")).rsplit(":", 1)[-1]
             base = f"http://127.0.0.1:{port}"
             opener = build_opener(HTTPCookieProcessor(CookieJar()))
             for attempt in range(30):
                 try:
-                    request(opener, base, "/healthz")
+                    health = request(opener, base, "/healthz")
+                    assert health.get("service") == "jm-bot" and health.get("version")
                     break
                 except (URLError, OSError, RuntimeError):
                     if attempt == 29:
@@ -98,10 +136,12 @@ async def smoke(image: str) -> None:
                 assert request(opener, base, asset), f"Missing image asset: {asset}"
             request(opener, base, "/api/status", status=401)
             request(opener, base, "/api/auth/login", method="POST", data={"password": password})
+            assert request(opener, base, "/api/status")["version"] == health["version"]
             return opener, base
 
         try:
             opener, base = await start()
+            print("PASS: Compose created all five absent bind directories and shared prepared configuration", flush=True)
             request(opener, base, "/api/permissions", method="PUT", data=permissions)
             saved = request(opener, base, "/api/permissions")
             assert all(saved[key] == value for key, value in permissions.items()), "Permissions were not saved"
@@ -147,7 +187,7 @@ async def smoke(image: str) -> None:
                 "print(next(line for line in Path('/proc/1/status').read_text().splitlines() if line.startswith('VmRSS:')))",
             )
             print(f"Image size: {size} bytes; idle memory: {memory}; PID 1 {rss}", flush=True)
-            await docker("rm", "--force", name)
+            await docker(*compose_args, "down")
             opener, base = await start()
             saved = request(opener, base, "/api/permissions")
             assert all(saved[key] == value for key, value in permissions.items()), "Permissions were lost on recreation"
@@ -160,18 +200,18 @@ async def smoke(image: str) -> None:
             )
             print("PASS: recreating the container preserves permissions, internal tokens and mounted output", flush=True)
         finally:
-            for suffix in ("-reader", ""):
-                try:
-                    await docker("rm", "--force", name + suffix)
-                except (RuntimeError, FileNotFoundError):
-                    pass
+            try:
+                await docker("rm", "--force", name + "-reader")
+            except (RuntimeError, FileNotFoundError):
+                pass
+            await docker(*compose_args, "down")
             # Only these temporary mounts belong to this invocation.
             try:
                 await docker(
                     "run", "--rm", "--name", name + "-cleanup", "--network", "none",
                     "--user", "0:0", *mounts, "--entrypoint", "python", image, "-c",
                     "from pathlib import Path; import shutil\n"
-                    "for folder in ('/data', '/napcat-config', '/downloads', '/proxy-data'):\n"
+                    "for folder in ('/data', '/napcat-config', '/downloads', '/proxy-data', '/qq-data'):\n"
                     "    for path in Path(folder).iterdir():\n"
                     "        if path.is_dir() and not path.is_symlink(): shutil.rmtree(path)\n"
                     "        else: path.unlink()\n"

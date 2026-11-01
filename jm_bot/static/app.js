@@ -84,6 +84,11 @@ function badge(id, message, kind) {
   $(id).className = `pill ${kind}`;
 }
 
+function renderVersion(version) {
+  if (!version) return;
+  for (const element of document.querySelectorAll('[data-app-version]')) element.textContent = `JM-Bot ${version}`;
+}
+
 function updateTestButton() {
   $('test-submit').disabled = testSending || downloadPending || proxyLoading || !latestStatus?.ready || !!latestStatus?.busy || !$('test-target').value;
 }
@@ -97,6 +102,7 @@ function refreshQrImage() {
 }
 
 function renderStatus(status) {
+  renderVersion(status.version);
   latestStatus = status;
   const qq = status.qq || {};
   const online = !!qq.isLogin && !qq.isOffline;
@@ -327,7 +333,7 @@ function renderDownloadProgress(status) {
     element.hidden = true;
     element.textContent = '';
   }
-  $('download-current-mode').textContent = `当前生效：${status.download_mode === 'mihomo' ? 'NAS 独立代理' : status.download_mode === 'direct' ? '直连' : '等待读取'}。检测使用已保存的线路。`;
+  $('download-current-mode').textContent = `当前生效：${status.download_mode === 'mihomo' ? '内置代理' : status.download_mode === 'direct' ? '直连' : '等待读取'}。检测使用已保存的线路。`;
 }
 
 async function loadDownloadSettings() {
@@ -417,7 +423,7 @@ $('download-form').addEventListener('submit', (event) => {
     return;
   }
   if (settings.mode === 'mihomo' && (!proxyStatus?.configured || !proxyStatus?.healthy)) {
-    feedback('download-feedback', '请先导入节点，并确认代理连接正常，再保存 NAS 独立代理模式。', true);
+    feedback('download-feedback', '请先导入节点，并确认代理连接正常，再保存内置代理模式。', true);
     return;
   }
   const version = downloadEditVersion;
@@ -460,7 +466,7 @@ $('proxy-import-form').addEventListener('submit', (event) => {
     if ($('proxy-file').files[0] === file) $('proxy-file').value = '';
     delete $('proxy-node').dataset.dirty;
     renderProxyStatus(result);
-    feedback('proxy-feedback', result.message || '节点已导入并测试。连接正常后可选择 NAS 独立代理并保存。');
+    feedback('proxy-feedback', result.message || '节点已导入并测试。连接正常后可选择内置代理并保存。');
   });
 });
 $('proxy-node').addEventListener('change', () => { $('proxy-node').dataset.dirty = 'true'; });
@@ -608,7 +614,7 @@ $('test-form').addEventListener('submit', async (event) => {
   try {
     const result = await api('/api/test-file', { method: 'POST', body: JSON.stringify({ kind, target_id }) });
     const failed = ['error', 'failed', 'uncertain'].includes(result.status);
-    const path = result.path ? `\nNAS 保留文件：${result.path}` : '';
+    const path = result.path ? `\n项目目录中的保留文件：${result.path}` : '';
     feedback('test-feedback', `${result.message || '请求已处理，请在 QQ 中检查文件。'}${path}`, failed);
     await pollStatus();
   } catch (error) {
@@ -621,6 +627,8 @@ $('test-form').addEventListener('submit', async (event) => {
 });
 
 setTab(location.hash.slice(1));
+window.addEventListener('hashchange', () => setTab(location.hash.slice(1)));
+api('/healthz').then((health) => renderVersion(health.version)).catch(() => renderVersion('版本暂不可用'));
 api('/api/auth/session').then((session) => {
   if (session.authenticated) pollStatus();
 }).catch((error) => feedback('login-error', error.message, true));
