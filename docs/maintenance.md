@@ -5,15 +5,29 @@
 ## 升级、备份与恢复
 
 1. 等当前任务结束，在原项目目录运行 `docker compose stop`，备份 `compose.yaml` 和 `data/`、`napcat-config/`、`qq-data/`、`downloads/`、`proxy-data/` 五个目录。备份包含登录状态、口令和订阅凭据，应私密保存。
-2. 确认目标版本已发布且可以拉取，将 Compose 完整替换为目标版配置，填回原 `ADMIN_PASSWORD`，保留原端口和五个挂载路径；不要用空目录替换已有数据。
+2. 确认目标版本已发布且可以拉取，将 Compose 完整替换为目标版配置，保留原端口和五个挂载路径；新版 Compose 无需填写管理密码，不要用空目录替换已有数据。
 3. 在原目录运行 `docker compose pull`，再运行 `docker compose up -d --force-recreate`。
 4. 登录网页，核对 QQ、权限、下载方式和节点，发送普通测试 PDF，再检测下载线路及完整下载。升级不会主动把已保存的下载方式改为直连。
 
-重建容器继续挂载原五个目录。修改管理密码时，更新 Compose 的 `ADMIN_PASSWORD` 后重新创建 JM-Bot 容器；普通重启不会更新环境变量。不要手改 `data/config.json` 或内部 QQ、代理口令，也不要公开上传运行配置和日志包。
+重建容器继续挂载原五个目录。管理密码以独立随机盐和哈希私密保存在持久目录的 `data/config.json` 中，不存明文。以后修改密码直接在已登录网页的侧栏打开“修改密码”，填写旧密码、新密码和确认密码；保存后所有会话退出，使用新密码重新登录，无需改 Compose 或重建容器。密码只要求非空，不强制 12 位，允许短密码或中文；建议使用难猜的密码。
 
-回退前停止项目，恢复升级前备份的 Compose、原密码和对应配置，再拉取并重新创建服务；不要删除运行数据。删除项目或容器时不要选择删除宿主机数据。
+兼容旧部署：仅当 `data/config.json` 尚未保存管理密码凭据时，旧 Compose 中非空、非占位符的 `ADMIN_PASSWORD` 才会自动导入并保存为盐和哈希。已有凭据后，环境变量不会覆盖网页设置的密码。使用新版 Compose 挂载旧数据时，若旧数据尚未保存凭据且不再携带旧环境变量，首次打开网页设置密码即可；原 QQ 登录、权限和其他配置文件保留不动。
+
+不要手改 `data/config.json` 中的凭据或内部 QQ、代理口令，也不要公开上传运行配置和日志包。回退前停止项目，恢复升级前备份的 Compose 和对应五个目录，再拉取并重新创建服务；不要删除运行数据。删除项目或容器时不要选择删除宿主机数据。
 
 重启会中断在途任务，不自动续传、不跨任务复用进度，也不自动重发。PDF 已生成但发送失败或未确认时，按页面或日志提示从 `downloads/` 取回，先确认 QQ 是否已收到再决定是否重试；留存文件需自行清理。缺页或停止的下载不会保留可发送的半本 PDF。
+
+### 忘记管理密码
+
+在原项目目录依次运行以下命令。第二条命令会交互要求输入新密码并确认，输入不会显示；不要把密码放进命令行。
+
+```text
+docker compose stop jm-bot
+docker compose run --rm --no-deps jm-bot python -m jm_bot --reset-admin-password
+docker compose up -d
+```
+
+重置只更新持久配置中的管理密码凭据，保留 QQ 登录、权限和代理配置。启动后使用新密码登录；不要为重置密码删除 `data/` 或其他数据目录。
 
 ## 代理与网络排查
 
@@ -73,5 +87,5 @@ python scripts/container_smoke.py --image jm-bot:ci
 
 `mihomo_smoke.py` 用真实核心与本地受控 HTTP 节点检查原生解析、自动/指定节点、失败回滚、重启恢复和不可用时拒绝代理请求，不使用私人订阅或访问真实漫画站点。成品容器检查覆盖离线网页启动、认证、保存恢复及只读文件访问；空闲内存不代表下载峰值，也不包含 QQ 与代理整体开销。
 
-[GitHub Actions](https://github.com/Epiphany-Leave/jm-bot/actions) 在推送和手动运行时测试构建；版本标签用于发布候选镜像。发布后还需匿名拉取检查：仓库公开不代表镜像包公开，旧版检查不能代替新版。用户部署环境的扫码、文件、下载及重建恢复验收完成前保持候选版。[GHCR 权限说明](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
+[GitHub Actions](https://github.com/Epiphany-Leave/jm-bot/actions) 在推送和手动运行时测试构建；版本标签用于发布对应版本镜像。`1.1.1` 当前待发布，不能据版本号推定已验收稳定。发布后还需匿名拉取检查：仓库公开不代表镜像包公开，旧版检查不能代替新版。用户部署环境的扫码、文件、下载及重建恢复验收单独记录，实际范围见[验证记录](verification.md)。[GHCR 权限说明](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)。
 

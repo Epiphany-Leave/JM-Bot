@@ -2,13 +2,11 @@ name: jm-bot
 
 services:
   jm-bot:
-    image: ghcr.io/epiphany-leave/jm-bot:1.1.0-rc.5
+    image: ghcr.io/epiphany-leave/jm-bot:1.1.1
     platform: linux/amd64
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
-      # 唯一需要填写的值：至少 12 个字符，建议使用随机英文字母和数字。
-      ADMIN_PASSWORD: "REPLACE_WITH_YOUR_ADMIN_PASSWORD"
     ports:
       - "16099:8080"
     volumes:

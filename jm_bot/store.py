@@ -1,5 +1,7 @@
 """Persistent settings for the single administrator and managed NapCat instance."""
 import json
+import hashlib
+import hmac
 import os
 from pathlib import Path
 import secrets
@@ -9,6 +11,41 @@ import re
 
 from .config import positive_id
 from .download_settings import download_settings
+
+
+def validate_password(value: str) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value) > 1024:
+        raise ValueError("密码不能为空或只有空白，且不能超过 1024 个字符")
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError("密码包含无效字符") from None
+    return value
+
+
+def password_credential(value: str) -> dict:
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", validate_password(value).encode(), salt, 600000)
+    return {"algorithm": "pbkdf2-sha256", "iterations": 600000, "salt": salt.hex(), "hash": digest.hex()}
+
+
+def validate_credential(value: dict) -> dict:
+    if (not isinstance(value, dict) or set(value) != {"algorithm", "iterations", "salt", "hash"}
+            or value["algorithm"] != "pbkdf2-sha256" or type(value["iterations"]) is not int
+            or value["iterations"] != 600000
+            or not isinstance(value["salt"], str) or re.fullmatch(r"[0-9a-f]{32}", value["salt"]) is None
+            or not isinstance(value["hash"], str) or re.fullmatch(r"[0-9a-f]{64}", value["hash"]) is None):
+        raise ValueError("data/config.json 中的管理密码记录无效；请从备份恢复")
+    return dict(value)
+
+
+def verify_password(value: str, credential: dict) -> bool:
+    try:
+        validate_password(value)
+    except ValueError:
+        return False
+    digest = hashlib.pbkdf2_hmac("sha256", value.encode(), bytes.fromhex(credential["salt"]), credential["iterations"])
+    return hmac.compare_digest(digest.hex(), credential["hash"])
 
 
 def permissions(value: dict) -> dict:
@@ -44,6 +81,7 @@ def atomic_json(path: Path, value: dict, mode: int = 0o600) -> None:
 
 class StateStore:
     def __init__(self, directory: Path, env=None):
+        env = os.environ if env is None else env
         self.path = directory / "config.json"
         directory.mkdir(parents=True, exist_ok=True)
         directory.chmod(0o700)
@@ -75,6 +113,12 @@ class StateStore:
             }
             atomic_json(self.path, state)
         updated = dict(state)
+        if "admin_credential" in state:
+            updated["admin_credential"] = validate_credential(state["admin_credential"])
+        else:
+            legacy = env.get("ADMIN_PASSWORD", "")
+            if legacy.strip() and not legacy.startswith("REPLACE_"):
+                updated["admin_credential"] = password_credential(legacy)
         updated["download"] = download_settings(state.get("download"))
         for key in ("proxy_control_token", "proxy_password"):
             if key not in updated:
@@ -88,6 +132,11 @@ class StateStore:
             atomic_json(self.path, updated)
         state = updated
         self.state = state
+
+    def save_admin_credential(self, value: dict) -> None:
+        updated = {**self.state, "admin_credential": validate_credential(value)}
+        atomic_json(self.path, updated)
+        self.state = updated
 
     def get_permissions(self) -> dict:
         return permissions(self.state["permissions"])

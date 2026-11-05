@@ -2,8 +2,6 @@
 import asyncio
 from collections import defaultdict, deque
 from contextlib import suppress
-import hashlib
-import hmac
 import logging
 from pathlib import Path
 import secrets
@@ -19,7 +17,7 @@ from .napcat import NapCatError
 from .proxy import ProxyError
 from .downloader import DownloadFailure
 from .download_settings import download_settings
-from .store import permissions
+from .store import permissions, password_credential, validate_password, verify_password
 
 
 log = logging.getLogger(__name__)
@@ -127,12 +125,23 @@ class Runtime:
         return redact(value)
 
 
-def create_app(runtime: Runtime, password: str, test_pdf: Path, *, manage_runtime=True):
-    if len(password) < 12 or password.startswith("REPLACE_") or "\n" in password or "\r" in password:
-        raise ValueError("请在 Compose 中填写自己的 ADMIN_PASSWORD（至少 12 位），然后重新创建容器")
+def create_app(runtime: Runtime, password: str = "", test_pdf: Path = None, *, manage_runtime=True):
     sessions = {}
     attempts = defaultdict(deque)
-    password_hash = hashlib.sha256(password.encode()).digest()
+    auth_lock = asyncio.Lock()
+
+    @web.middleware
+    async def security_headers(request, handler):
+        try:
+            response = await handler(request)
+        except web.HTTPException as exc:
+            response = exc
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+        if isinstance(response, web.HTTPException):
+            raise response
+        return response
 
     @web.middleware
     async def protection(request, handler):
@@ -146,7 +155,7 @@ def create_app(runtime: Runtime, password: str, test_pdf: Path, *, manage_runtim
                 return web.json_response({"error": "请求来源不匹配，请直接打开管理网页重试"}, status=403)
             if request.content_type != "application/json":
                 return web.json_response({"error": "请使用管理网页提交设置"}, status=415)
-        if request.path.startswith("/api/") and request.path not in ("/api/auth/login", "/api/auth/session"):
+        if request.path.startswith("/api/") and request.path not in ("/api/auth/login", "/api/auth/session", "/api/auth/setup"):
             key = request.cookies.get("jm_session", "")
             if sessions.get(key, 0) <= time.monotonic():
                 sessions.pop(key, None)
@@ -173,17 +182,20 @@ def create_app(runtime: Runtime, password: str, test_pdf: Path, *, manage_runtim
         except Exception as exc:
             log.error("Management request failed (%s)", type(exc).__name__)
             response = web.json_response({"error": "操作暂未完成，请检查连接状态后重试"}, status=503)
-        response.headers["Cache-Control"] = "no-store"
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"
-        if isinstance(response, web.HTTPException):
-            raise response
         return response
 
-    app = web.Application(middlewares=[protection], client_max_size=3 * 1024 * 1024)
+    app = web.Application(middlewares=[security_headers, protection], client_max_size=3 * 1024 * 1024)
     app[RUNTIME] = runtime
 
-    async def login(request):
+    async def import_legacy_password(app):
+        if ("admin_credential" not in runtime.store.state and password.strip()
+                and not password.startswith("REPLACE_")):
+            credential = await asyncio.to_thread(password_credential, password)
+            runtime.store.save_admin_credential(credential)
+
+    app.on_startup.append(import_legacy_password)
+
+    def rate_limit(request):
         now = time.monotonic()
         for key in list(sessions):
             if sessions[key] <= now:
@@ -195,22 +207,70 @@ def create_app(runtime: Runtime, password: str, test_pdf: Path, *, manage_runtim
                 del attempts[key]
         key = request.remote or "local"
         if len(attempts) >= 10000 or len(attempts[key]) >= 5:
-            return web.json_response({"error": "登录尝试过多，请一分钟后重试"}, status=429)
-        body = await request.json()
-        candidate = body.get("password") if isinstance(body, dict) else None
-        if not isinstance(candidate, str) or not hmac.compare_digest(hashlib.sha256(candidate.encode()).digest(), password_hash):
-            attempts[key].append(now)
-            return web.json_response({"error": "管理密码不正确，请使用 Compose 中的 ADMIN_PASSWORD"}, status=401)
-        attempts.pop(key, None)
+            raise web.HTTPTooManyRequests(text='{"error":"尝试过多，请一分钟后重试"}', content_type="application/json")
+        attempts[key].append(now)
+
+    def authenticated(request):
+        return sessions.get(request.cookies.get("jm_session", ""), 0) > time.monotonic()
+
+    def start_session(request):
+        attempts.pop(request.remote or "local", None)
         while len(sessions) >= 64:
             sessions.pop(next(iter(sessions)))
         session = secrets.token_urlsafe(32)
-        sessions[session] = now + 12 * 3600
+        sessions[session] = time.monotonic() + 12 * 3600
         response = web.json_response({"ok": True})
         response.set_cookie("jm_session", session, httponly=True, samesite="Strict",
                             secure=request.secure or request.headers.get("Origin") == f"https://{request.host}",
                             max_age=12 * 3600)
         return response
+
+    async def login(request):
+        body = await request.json()
+        async with auth_lock:
+            rate_limit(request)
+            candidate = body.get("password") if isinstance(body, dict) else None
+            credential = runtime.store.state.get("admin_credential")
+            if credential is None or not await asyncio.to_thread(verify_password, candidate, credential):
+                return web.json_response({"error": "管理密码不正确，或尚未设置管理密码"}, status=401)
+            return start_session(request)
+
+    def confirmed_password(body, key):
+        if not isinstance(body, dict):
+            raise ValueError("请填写密码并确认")
+        candidate = validate_password(body.get(key))
+        if candidate != body.get("confirm_password"):
+            raise ValueError("两次输入的密码不一致")
+        return candidate
+
+    async def setup(request):
+        body = await request.json()
+        async with auth_lock:
+            if "admin_credential" in runtime.store.state:
+                return web.json_response({"error": "管理密码已设置，请登录"}, status=409)
+            rate_limit(request)
+            candidate = confirmed_password(body, "password")
+            credential = await asyncio.to_thread(password_credential, candidate)
+            runtime.store.save_admin_credential(credential)
+            return start_session(request)
+
+    async def change_password(request):
+        body = await request.json()
+        async with auth_lock:
+            # A queued request may have passed middleware before another change invalidated its session.
+            if not authenticated(request):
+                return web.json_response({"error": "请先登录管理网页"}, status=401)
+            rate_limit(request)
+            candidate = confirmed_password(body, "new_password")
+            if not await asyncio.to_thread(verify_password, body.get("current_password"), runtime.store.state["admin_credential"]):
+                return web.json_response({"error": "当前管理密码不正确"}, status=400)
+            credential = await asyncio.to_thread(password_credential, candidate)
+            runtime.store.save_admin_credential(credential)
+            sessions.clear()
+            attempts.pop(request.remote or "local", None)
+            response = web.json_response({"ok": True, "message": "管理密码已修改，请使用新密码重新登录"})
+            response.del_cookie("jm_session")
+            return response
 
     async def logout(request):
         sessions.pop(request.cookies.get("jm_session", ""), None)
@@ -220,7 +280,8 @@ def create_app(runtime: Runtime, password: str, test_pdf: Path, *, manage_runtim
 
     async def session_status(request):
         authenticated = sessions.get(request.cookies.get("jm_session", ""), 0) > time.monotonic()
-        return web.json_response({"authenticated": authenticated})
+        return web.json_response({"authenticated": authenticated,
+                                  "setup_required": "admin_credential" not in runtime.store.state})
 
     async def health(request):
         return web.json_response({"ok": True, "service": "jm-bot", "version": __version__})
@@ -333,6 +394,8 @@ def create_app(runtime: Runtime, password: str, test_pdf: Path, *, manage_runtim
         app.router.add_get(path, legacy_login)
     app.router.add_static("/static/", STATIC, show_index=False)
     app.router.add_post("/api/auth/login", login)
+    app.router.add_post("/api/auth/setup", setup)
+    app.router.add_post("/api/auth/password", change_password)
     app.router.add_get("/api/auth/session", session_status)
     app.router.add_post("/api/auth/logout", logout)
     app.router.add_get("/api/status", status)

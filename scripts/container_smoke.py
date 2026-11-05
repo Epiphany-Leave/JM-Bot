@@ -9,7 +9,6 @@ import asyncio
 from http.cookiejar import CookieJar
 import json
 from pathlib import Path
-import secrets
 import sys
 import tempfile
 from urllib.error import HTTPError, URLError
@@ -17,12 +16,13 @@ from urllib.request import HTTPCookieProcessor, Request, build_opener
 import uuid
 
 
-async def docker(*args: str, timeout: float = 60) -> str:
+async def docker(*args: str, timeout: float = 60, stdin: bytes | None = None) -> str:
     process = await asyncio.create_subprocess_exec(
-        "docker", *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        "docker", *args, stdin=asyncio.subprocess.PIPE if stdin is not None else None,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
     try:
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout)
+        stdout, stderr = await asyncio.wait_for(process.communicate(stdin), timeout)
     except BaseException:
         if process.returncode is None:
             process.kill()
@@ -54,7 +54,7 @@ def request(opener, base: str, path: str, *, method="GET", data=None, status=200
 async def smoke(image: str) -> None:
     if sys.platform != "linux":
         raise RuntimeError("This smoke check requires Linux and a local Docker daemon")
-    password = secrets.token_hex(16)
+    password = "短"
     permissions = {"allowed_users": ["10001"], "allowed_groups": ["20001"], "group_allow_all": True}
     name = f"jm-bot-smoke-{uuid.uuid4().hex[:12]}"
     with tempfile.TemporaryDirectory(prefix="jm-bot-smoke-") as directory:
@@ -77,7 +77,7 @@ async def smoke(image: str) -> None:
             service["restart"] = "no"
         main_service = config["services"]["jm-bot"]
         main_service["container_name"] = name
-        main_service["environment"]["ADMIN_PASSWORD"] = password
+        assert "ADMIN_PASSWORD" not in main_service["environment"], "Compose must not require a deployment password"
         main_service["ports"] = ["127.0.0.1::8080"]
         main_service["healthcheck"].update(interval="1s", start_period="1s")
         napcat = config["services"]["napcat"]
@@ -106,11 +106,15 @@ async def smoke(image: str) -> None:
             "state = json.loads(state_path.read_text())\n"
             "tokens = [state[key] for key in ('onebot_token', 'napcat_token', 'proxy_control_token', 'proxy_password')]\n"
             "assert all(isinstance(token, str) and len(token) >= 32 for token in tokens)\n"
+            "credential = state['admin_credential']\n"
+            "assert set(credential) == {'algorithm', 'iterations', 'salt', 'hash'}\n"
+            "assert credential['algorithm'] == 'pbkdf2-sha256' and credential['iterations'] == 600000\n"
+            "assert len(credential['salt']) == 32 and len(credential['hash']) == 64\n"
             "webui = Path('/napcat-config/webui.json')\n"
             "assert webui.stat().st_mode & 0o777 == 0o600\n"
             "assert (webui.stat().st_uid, webui.stat().st_gid) == (1000, 1000)\n"
             "assert json.loads(webui.read_text())['token'] == state['napcat_token']\n"
-            "print(hashlib.sha256(json.dumps(tokens).encode()).hexdigest())\n"
+            "print(hashlib.sha256(json.dumps([tokens, credential], sort_keys=True).encode()).hexdigest())\n"
         )
 
         async def start():
@@ -135,7 +139,13 @@ async def smoke(image: str) -> None:
             for asset in ("/static/app.js", "/static/style.css"):
                 assert request(opener, base, asset), f"Missing image asset: {asset}"
             request(opener, base, "/api/status", status=401)
-            request(opener, base, "/api/auth/login", method="POST", data={"password": password})
+            auth = request(opener, base, "/api/auth/session")
+            if auth["setup_required"]:
+                request(opener, base, "/api/auth/setup", method="POST",
+                        data={"password": password, "confirm_password": password})
+            else:
+                request(opener, base, "/api/auth/login", method="POST", data={"password": password})
+            assert not request(opener, base, "/api/auth/session")["setup_required"]
             assert request(opener, base, "/api/status")["version"] == health["version"]
             return opener, base
 
@@ -199,6 +209,30 @@ async def smoke(image: str) -> None:
                 "assert Path('/downloads/permission-check/sample.pdf').read_bytes().startswith(b'%PDF')",
             )
             print("PASS: recreating the container preserves permissions, internal tokens and mounted output", flush=True)
+            request(opener, base, "/api/auth/password", method="POST", data={
+                "current_password": password, "new_password": "改", "confirm_password": "改"})
+            request(opener, base, "/api/status", status=401)
+            request(opener, base, "/api/auth/login", method="POST", data={"password": password}, status=401)
+            request(opener, base, "/api/auth/login", method="POST", data={"password": "改"})
+            assert request(opener, base, "/api/permissions") == saved
+            print("PASS: short Unicode password setup, persisted hash and password change invalidate the old session", flush=True)
+            business_check = (
+                "import hashlib,json; from pathlib import Path; "
+                "s=json.loads(Path('/data/config.json').read_text()); s.pop('admin_credential'); "
+                "print(hashlib.sha256(json.dumps(s,sort_keys=True).encode()).hexdigest())"
+            )
+            business_fingerprint = await docker("exec", name, "python", "-c", business_check)
+            await docker(*compose_args, "down")
+            password = "新"
+            await docker("run", "--rm", "--interactive", "--network", "none", *mounts,
+                         "--entrypoint", "python", image, "-m", "jm_bot", "--reset-admin-password",
+                         stdin=((password + "\n") * 2).encode())
+            opener, base = await start()
+            assert request(opener, base, "/api/permissions") == saved
+            assert await docker("exec", name, "python", "-c", business_check) == business_fingerprint
+            await docker("exec", name, "python", "-c",
+                         "from pathlib import Path; assert Path('/downloads/permission-check/sample.pdf').read_bytes().startswith(b'%PDF')")
+            print("PASS: interactive offline password recovery preserves permissions, internal tokens and output", flush=True)
         finally:
             try:
                 await docker("rm", "--force", name + "-reader")

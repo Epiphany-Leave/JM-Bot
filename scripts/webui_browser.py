@@ -15,6 +15,101 @@ from tests.https_proxy import https_proxy
 from tests.webui_proxy_fixture import SUBSCRIPTION, local_download
 
 
+async def check_password_setup(browser, output):
+    with tempfile.TemporaryDirectory() as folder:
+        async with running_webui(Path(folder), password="") as (url, runtime, peer):
+            context = await browser.new_context(viewport={"width": 1440, "height": 1080})
+            try:
+                page = await context.new_page()
+                errors, requests = [], []
+                page.on("pageerror", lambda error: errors.append(str(error)))
+                page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
+                page.on("request", lambda request: requests.append(request.url.removeprefix(url)))
+                await page.goto(url)
+                await expect(page.locator('#login-heading')).to_have_text('设置管理密码')
+                await expect(page.locator('#confirm-password')).to_be_visible()
+                await expect(page.locator('#password')).to_have_attribute('autocomplete', 'new-password')
+                await expect(page.locator('#login-submit')).to_be_enabled()
+                assert not [path for path in requests if path.startswith('/api/') and path != '/api/auth/session']
+                await page.screenshot(path=output / '17-first-setup.png', full_page=True)
+                await page.locator('#password').fill('a')
+                await page.locator('#confirm-password').fill('b')
+                await page.locator('#login-submit').click()
+                await expect(page.locator('#login-error')).to_contain_text('不一致')
+                assert not any(path == '/api/auth/setup' for path in requests)
+                await page.locator('#password').fill(' ')
+                await page.locator('#confirm-password').fill(' ')
+                await page.locator('#login-submit').click()
+                await expect(page.locator('#login-error')).to_contain_text('空白')
+                await page.locator('#password').fill('a')
+                await page.locator('#confirm-password').fill('a')
+                async with page.expect_response(lambda response: response.url.endswith('/api/auth/setup')) as setup:
+                    await page.locator('#login-submit').click()
+                assert (await setup.value).status == 200
+                await expect(page.locator('#app-view')).to_be_visible()
+                await expect(page.locator('#tab-overview')).to_be_visible()
+                assert (await (await context.request.get(url + '/api/auth/session')).json())['authenticated']
+                await page.reload()
+                await expect(page.locator('#app-view')).to_be_visible()
+                await page.locator('#logout').click()
+                await expect(page.locator('#login-heading')).to_have_text('登录管理台')
+                await expect(page.locator('#confirm-password')).not_to_be_visible()
+                await expect(page.locator('#password')).to_have_attribute('autocomplete', 'current-password')
+                await page.locator('#password').fill('a')
+                await page.locator('#login-submit').click()
+                await expect(page.locator('#app-view')).to_be_visible()
+                other = await browser.new_context()
+                try:
+                    response = await other.request.post(url + '/api/auth/login', data={"password": "a"})
+                    assert response.status == 200
+                    await page.locator('#change-password').click()
+                    await page.locator('#current-password').fill('a')
+                    await page.locator('#new-password').fill('中文')
+                    await page.locator('#new-password-confirm').fill('中文')
+                    await page.screenshot(path=output / '18-change-password.png', full_page=True)
+                    await page.locator('#password-cancel').click()
+                    await expect(page.locator('#current-password')).to_have_value('')
+                    await expect(page.locator('#new-password')).to_have_value('')
+                    await expect(page.locator('#new-password-confirm')).to_have_value('')
+                    await page.locator('#change-password').click()
+                    await page.locator('#current-password').fill('a')
+                    await page.locator('#new-password').fill('中文')
+                    await page.locator('#new-password-confirm').fill('中文')
+                    async with page.expect_response(lambda response: response.url.endswith('/api/auth/password')) as change:
+                        await page.locator('#password-save').click()
+                    assert (await change.value).status == 200
+                    await expect(page.locator('#login-view')).to_be_visible()
+                    await expect(page.locator('#login-error')).to_contain_text('重新登录')
+                    await expect(page.locator('#new-password')).to_have_value('')
+                    assert not (await (await other.request.get(url + '/api/auth/session')).json())['authenticated']
+                    old = await other.request.post(url + '/api/auth/login', data={"password": "a"})
+                    assert old.status == 401
+                finally:
+                    await other.close()
+                await page.locator('#password').fill('中文')
+                await page.locator('#login-submit').click()
+                await expect(page.locator('#app-view')).to_be_visible()
+                await expect(page.locator('#password')).to_have_value('')
+                assert await page.evaluate('localStorage.length') == 0
+                await page.screenshot(path=output / '19-password-overview.png', full_page=True)
+                await page.set_viewport_size({"width": 390, "height": 844})
+                await page.locator('#change-password').click()
+                await page.locator('#current-password').fill('中文')
+                await page.locator('#new-password').fill('temporary')
+                await page.locator('#new-password-confirm').fill('temporary')
+                assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+                await page.screenshot(path=output / '20-mobile-password.png', full_page=True)
+                await page.keyboard.press('Escape')
+                await expect(page.locator('#password-dialog')).not_to_be_visible()
+                await expect(page.locator('#current-password')).to_have_value('')
+                await expect(page.locator('#new-password')).to_have_value('')
+                await expect(page.locator('#new-password-confirm')).to_have_value('')
+                assert not errors, 'Password setup browser errors: ' + ' | '.join(errors)
+                print('Password WebUI OK: first setup with one character, validation, no pre-auth business APIs, reload/logout/login, Unicode change, all sessions invalidated, old password rejected, new password accepted, cancel/Escape clearing, mobile; console errors=0')
+            finally:
+                await context.close()
+
+
 async def check_layout(page, output):
     for width in (1440, 390):
         await page.set_viewport_size({"width": width, "height": 900})
@@ -171,6 +266,7 @@ async def main(channel=None):
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True, **({"channel": channel} if channel else {}))
                 try:
+                    await check_password_setup(browser, output)
                     page = await browser.new_page(viewport={"width": 1440, "height": 1080}, device_scale_factor=1)
                     errors = []
                     expected_http_errors = []

@@ -13,15 +13,16 @@
     <section class="login-card" aria-labelledby="login-heading">
       <div class="brand-mark" aria-hidden="true">JM</div>
       <p class="eyebrow">自己的 QQ 文件助手</p>
-      <h1 id="login-heading">欢迎回来</h1>
-      <p class="muted">登录后，连接 QQ 并设置谁可以使用机器人。</p>
+      <h1 id="login-heading">登录管理台</h1>
+      <p id="login-description" class="muted">正在检查管理密码设置…</p>
       <form id="login-form">
         <label for="password">管理密码</label>
-        <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
+        <input id="password" name="password" type="password" autocomplete="current-password" maxlength="1024" required autofocus>
+        <div id="setup-confirm" hidden><label for="confirm-password">确认管理密码</label><input id="confirm-password" name="confirm_password" type="password" autocomplete="new-password" maxlength="1024" disabled></div>
         <p id="login-error" class="feedback error" role="alert" hidden></p>
-        <button class="primary full" type="submit">登录管理台 <span aria-hidden="true">→</span></button>
+        <button id="login-submit" class="primary full" type="submit" disabled>登录管理台 →</button>
       </form>
-      <p class="login-note">使用部署时设置的管理密码。<br><span data-app-version>正在读取版本…</span></p>
+      <p class="login-note">管理密码仅用于此管理台。<br><span data-app-version>正在读取版本…</span></p>
     </section>
   </main>
 
@@ -35,7 +36,7 @@
         <button class="nav-item" data-tab="permissions"><span aria-hidden="true">⊞</span> 使用权限</button>
         <button class="nav-item" data-tab="download"><span aria-hidden="true">↓</span> 下载设置</button>
       </nav>
-      <div class="sidebar-bottom"><span class="local-note"><i aria-hidden="true"></i> 自己部署 · 自己管理</span><span class="local-note" data-app-version>正在读取版本…</span><button id="logout" class="text-button">退出登录</button></div>
+      <div class="sidebar-bottom"><span class="local-note"><i aria-hidden="true"></i> 自己部署 · 自己管理</span><span class="local-note" data-app-version>正在读取版本…</span><button id="change-password" class="text-button">修改密码</button><button id="logout" class="text-button">退出登录</button></div>
     </aside>
 
     <main class="main-content">
@@ -102,5 +103,16 @@
       <footer class="page-footer">简单连接，按需使用。<span>状态每 3 秒自动更新</span></footer>
     </main>
   </div>
+  <dialog id="password-dialog" aria-labelledby="password-heading">
+    <form id="password-form">
+      <h2 id="password-heading">修改管理密码</h2>
+      <p class="muted">保存后所有登录会话将失效，请使用新密码重新登录。</p>
+      <label for="current-password">当前密码</label><input id="current-password" type="password" autocomplete="current-password" maxlength="1024" required>
+      <label for="new-password">新密码</label><input id="new-password" type="password" autocomplete="new-password" maxlength="1024" required>
+      <label for="new-password-confirm">确认新密码</label><input id="new-password-confirm" type="password" autocomplete="new-password" maxlength="1024" required>
+      <p id="password-feedback" class="feedback error" role="alert" hidden></p>
+      <div class="password-actions"><button id="password-cancel" class="secondary" type="button">取消</button><button id="password-save" class="primary" type="submit">保存密码</button></div>
+    </form>
+  </dialog>
 </body>
 </html>

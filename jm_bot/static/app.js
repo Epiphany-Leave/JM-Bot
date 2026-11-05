@@ -2,6 +2,8 @@
 
 const $ = (id) => document.getElementById(id);
 let authenticated = false;
+let setupRequired = false;
+let authReady = false;
 let sessionVersion = 0;
 let pollTimer;
 let latestStatus = null;
@@ -51,6 +53,28 @@ function showLogin() {
   clearTimeout(pollTimer);
   $('app-view').hidden = true;
   $('login-view').hidden = false;
+  $('password-dialog').close();
+  $('password-form').reset();
+}
+
+function configureLogin(setup) {
+  setupRequired = setup;
+  authReady = true;
+  $('login-heading').textContent = setup ? '设置管理密码' : '登录管理台';
+  $('login-description').textContent = setup ? '首次使用，请设置并确认管理密码。保存后即可进入管理台。' : '输入管理密码，连接 QQ 并管理机器人。';
+  $('login-submit').textContent = setup ? '保存并进入管理台 →' : '登录管理台 →';
+  $('login-submit').disabled = false;
+  $('password').autocomplete = setup ? 'new-password' : 'current-password';
+  $('setup-confirm').hidden = !setup;
+  $('confirm-password').disabled = !setup;
+  $('confirm-password').required = setup;
+}
+
+function passwordError(password, confirmation) {
+  if (!password.trim()) return '密码不能为空或全为空白。';
+  if ([...password].length > 1024) return '密码不能超过 1024 个字符。';
+  if (password !== confirmation) return '两次输入的密码不一致。';
+  return '';
 }
 
 function showApp() {
@@ -516,12 +540,23 @@ for (const button of document.querySelectorAll('[data-cancel-download]')) {
 
 $('login-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  const button = event.submitter;
+  if (!authReady) return;
+  const password = $('password').value;
+  if (setupRequired) {
+    const error = passwordError(password, $('confirm-password').value);
+    if (error) { feedback('login-error', error, true); return; }
+  }
+  const button = $('login-submit');
+  const version = ++sessionVersion;
   button.disabled = true;
   feedback('login-error', '');
   try {
-    await api('/api/auth/login', { method: 'POST', body: JSON.stringify({ password: $('password').value }) });
+    await api(setupRequired ? '/api/auth/setup' : '/api/auth/login', { method: 'POST', body: JSON.stringify({ password, ...(setupRequired ? { confirm_password: $('confirm-password').value } : {}) }) });
+    if (version !== sessionVersion) return;
     $('password').value = '';
+    $('confirm-password').value = '';
+    if (setupRequired) setTab('overview');
+    configureLogin(false);
     showApp();
     loadPermissions();
     await pollStatus();
@@ -529,6 +564,38 @@ $('login-form').addEventListener('submit', async (event) => {
     feedback('login-error', error.message, true);
   } finally {
     button.disabled = false;
+  }
+});
+
+$('change-password').addEventListener('click', () => {
+  $('password-form').reset();
+  feedback('password-feedback', '');
+  $('password-dialog').showModal();
+});
+$('password-cancel').addEventListener('click', () => $('password-dialog').close());
+$('password-dialog').addEventListener('close', () => {
+  $('password-form').reset();
+  feedback('password-feedback', '');
+});
+$('password-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const error = passwordError($('new-password').value, $('new-password-confirm').value);
+  if (error) { feedback('password-feedback', error, true); return; }
+  $('password-save').disabled = true;
+  try {
+    await api('/api/auth/password', { method: 'POST', body: JSON.stringify({
+      current_password: $('current-password').value,
+      new_password: $('new-password').value,
+      confirm_password: $('new-password-confirm').value,
+    }) });
+    showLogin();
+    configureLogin(false);
+    feedback('login-error', '密码已修改，请使用新密码重新登录。');
+    $('password').focus();
+  } catch (error) {
+    feedback('password-feedback', error.message, true);
+  } finally {
+    $('password-save').disabled = false;
   }
 });
 
@@ -638,6 +705,9 @@ $('test-form').addEventListener('submit', async (event) => {
 setTab(location.hash.slice(1));
 window.addEventListener('hashchange', () => setTab(location.hash.slice(1)));
 api('/healthz').then((health) => renderVersion(health.version)).catch(() => renderVersion('版本暂不可用'));
+const initialSessionVersion = sessionVersion;
 api('/api/auth/session').then((session) => {
+  if (initialSessionVersion !== sessionVersion) return;
+  configureLogin(!!session.setup_required);
   if (session.authenticated) pollStatus();
 }).catch((error) => feedback('login-error', error.message, true));

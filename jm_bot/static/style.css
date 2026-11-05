@@ -37,6 +37,9 @@ nav { display: grid; gap: 6px; }
 .local-note { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--muted); }
 .local-note i { width: 6px; height: 6px; border-radius: 50%; background: #3a9c78; }
 .text-button { background: transparent; color: var(--accent); padding: 5px 0; text-align: left; font-size: 13px; min-height: 32px; }
+#password-dialog { width: min(440px, calc(100% - 32px)); max-height: calc(100% - 32px); overflow-y: auto; padding: 28px; border: 1px solid var(--line); border-radius: 12px; color: inherit; }
+#password-dialog::backdrop { background: rgb(25 39 57 / 35%); }
+.password-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 22px; }
 .main-content { margin-left: 224px; padding: 0 32px 22px; max-width: 1680px; }
 .topbar { height: 60px; margin: 0 -32px 28px; padding: 0 32px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); background: #fff; font-size: 12px; color: var(--muted); }
 .topbar span[aria-hidden] { margin: 0 10px; color: #a9b1bc; }

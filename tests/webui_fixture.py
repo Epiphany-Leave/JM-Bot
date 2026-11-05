@@ -144,7 +144,7 @@ class MockMihomo:
 
 
 @asynccontextmanager
-async def running_webui(directory):
+async def running_webui(directory, password=PASSWORD):
     store = StateStore(directory / "data", env={})
     store.prepare_napcat(directory / "napcat-config")
     peer = MockQQ(store)
@@ -173,7 +173,7 @@ async def running_webui(directory):
                                      test_url="http://probe.invalid/generate_204")
                 proxy.prepare()
                 runtime = Runtime(store, bot, napcat, proxy=proxy)
-                app = create_app(runtime, PASSWORD, ROOT / "samples" / "test.pdf")
+                app = create_app(runtime, password, ROOT / "samples" / "test.pdf")
                 runner = web.AppRunner(app, access_log=None)
                 await runner.setup()
                 try:

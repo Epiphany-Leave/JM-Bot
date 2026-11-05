@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import logging
+import getpass
 import os
 from pathlib import Path
 import signal
@@ -13,15 +14,13 @@ from .bot import JMBot
 from .config import Settings
 from .napcat import NapCat
 from .proxy import ManagedProxy
-from .store import StateStore
+from .store import StateStore, password_credential, validate_password
 from .web import Runtime, create_app
 
 
 async def serve() -> None:
     password = os.environ.get("ADMIN_PASSWORD", "")
-    if len(password) < 12 or password.startswith("REPLACE_") or "\n" in password or "\r" in password:
-        raise ValueError("请在 Compose 中填写自己的 ADMIN_PASSWORD（至少 12 位），然后重新创建容器")
-    store = StateStore(Path(os.environ.get("DATA_DIR", "/data")))
+    store = await asyncio.to_thread(StateStore, Path(os.environ.get("DATA_DIR", "/data")))
     config_dir = Path(os.environ.get("NAPCAT_CONFIG_DIR", "/napcat-config"))
     store.prepare_napcat(config_dir)
     acl = store.get_permissions()
@@ -58,11 +57,23 @@ async def serve() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="JM-Bot：一个管理密码，在网页扫码并配置权限。")
     parser.add_argument("--version", action="version", version=__version__)
-    parser.parse_args()
+    parser.add_argument("--reset-admin-password", action="store_true", help="停止服务后，交互重设管理密码（保留其他配置）")
+    args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     # Native retry logs can dump request headers and proxy credentials; use our safe task logs.
     logging.getLogger("jmcomic").disabled = True
     try:
+        if args.reset_admin_password:
+            directory = Path(os.environ.get("DATA_DIR", "/data"))
+            if not (directory / "config.json").is_file():
+                raise ValueError("未找到已有 data/config.json；首次启动请通过网页设置密码")
+            password = validate_password(getpass.getpass("新的管理密码: "))
+            if password != getpass.getpass("再次输入管理密码: "):
+                raise ValueError("两次输入的密码不一致")
+            store = StateStore(directory, env={})
+            store.save_admin_credential(password_credential(password))
+            print("管理密码已重设，请启动服务后使用新密码登录。")
+            return
         asyncio.run(serve())
     except (ValueError, OSError) as exc:
         parser.error(str(exc))
