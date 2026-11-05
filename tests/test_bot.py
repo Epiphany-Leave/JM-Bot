@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import img2pdf
 import pikepdf
@@ -259,3 +259,129 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
                     await active
         self.assertFalse(self.uploads())
         self.assertEqual(len(list(self.root.rglob("*.pdf"))), 1)
+
+    async def test_info_query_private_and_mentioned_group_text_only_and_deduplicated(self):
+        text = "标题：local\n作者：A、B\n简介：[CQ:image,file=unsafe]"
+        with patch.object(module, "query_album_info", return_value=text) as query:
+            for group in (None, 20001):
+                payload = event("/jm-s 0011451", group=group)
+                if group:
+                    payload["message"].insert(0, {"type": "at", "data": {"qq": "99999"}})
+                await self.bot.handle(payload, 1)
+                await self.bot.handle(payload, 1)
+                action, params = self.client.calls[-1]
+                self.assertEqual(action, "send_group_msg" if group else "send_private_msg")
+                self.assertEqual(params["message"], [{"type": "text", "data": {"text": text}}])
+                self.assertEqual(query.call_args.args[0], "11451")
+            self.assertEqual(query.call_count, 2)
+        module.download_pdf.assert_not_called()
+        self.assertFalse(self.uploads())
+        self.assertFalse(list(self.root.iterdir()))
+
+    async def test_info_query_permissions_usage_and_wrong_mention(self):
+        with patch.object(module, "query_album_info") as query:
+            for user, group in ((10002, None), (10002, 20001), (10001, 20002)):
+                await self.bot.handle(event("/jm-s 123", user=user, group=group), 1)
+            self.assertTrue(all("未授权" in text and "/jm-s" in text for text in self.messages()))
+            self.client.calls.clear()
+            for text in ("/jm-s", "/jm-s 0", "/jm-s -1", "/jm-s +1", "/jm-s x", "/jm-s 1 2", "/jm-s １２", "/jm-s ../12"):
+                await self.bot.handle(event(text), 1)
+            self.assertTrue(all("用法：/jm-s" in text for text in self.messages()))
+            self.client.calls.clear()
+            await self.bot.handle(event(message=[{"type": "at", "data": {"qq": "10002"}},
+                                                  {"type": "text", "data": {"text": "/jm-s 123"}}]), 1)
+            self.assertFalse(self.client.calls)
+            query.assert_not_called()
+
+    async def test_info_query_group_all_mode_uses_same_permissions(self):
+        self.bot = self.new_bot(users=frozenset(), group_all=True)
+        with patch.object(module, "query_album_info", return_value="info") as query:
+            await self.bot.handle(event("/jm-s 123", user=10002, group=20001), 1)
+            await self.bot.handle(event("/jm-s 123", user=10002, group=20002), 1)
+            await self.bot.handle(event("/jm-s 123", user=10002), 1)
+            self.assertEqual(query.call_count, 1)
+
+    async def test_info_query_uses_current_saved_proxy_settings(self):
+        class Proxy:
+            proxy_url = "http://127.0.0.1:7890"
+            ensure_ready = AsyncMock()
+        self.bot.proxy = Proxy()
+        self.bot.download_options = lambda: {"mode": "mihomo", "concurrency": 2}
+        def query(album_id, job, *, session):
+            self.assertEqual(session.settings["mode"], "mihomo")
+            self.assertEqual(session.settings["concurrency"], 2)
+            self.assertEqual(session.proxy_url, self.bot.proxy.proxy_url)
+            return "info"
+        with patch.object(module, "query_album_info", side_effect=query):
+            await self.bot.handle(event("/jm-s 123"), 1)
+        self.bot.proxy.ensure_ready.assert_awaited_once()
+        self.assertEqual(self.messages()[-1], "info")
+
+    async def test_info_reply_failure_releases_busy_without_success_or_retry(self):
+        original_call = self.client.call
+        async def fail_reply(action, **params):
+            if params.get("message") == [{"type": "text", "data": {"text": "info"}}]:
+                self.client.calls.append((action, params))
+                raise TimeoutError("https://untrusted.invalid")
+            return await original_call(action, **params)
+        with patch.object(module, "query_album_info", return_value="info"), patch.object(
+            self.client, "call", side_effect=fail_reply
+        ):
+            await self.bot.handle(event("/jm-s 123"), 1)
+        self.assertEqual(self.messages().count("info"), 1)
+        self.assertEqual(len(self.client.calls), 2)
+        self.assertEqual(self.bot.last_result["status"], "error")
+        self.assertIn("回复结果未确认", self.bot.last_result["message"])
+        self.assertFalse(self.bot.busy)
+        self.assertIsNone(self.bot.current_task)
+        self.assertFalse(self.uploads())
+
+    async def test_info_query_failure_and_disconnection_never_send_files_or_retry(self):
+        with patch.object(module, "query_album_info", side_effect=module.DownloadFailure("invalid_id", "编号不存在")):
+            await self.bot.handle(event("/jm-s 123"), 1)
+        self.assertEqual(self.messages()[-1], "编号不存在")
+        self.assertEqual(self.bot.last_result["code"], "invalid_id")
+        with patch.object(module, "query_album_info", side_effect=RuntimeError("https://secret.invalid")):
+            await self.bot.handle(event("/jm-s 123"), 1)
+        self.assertNotIn("secret", self.messages()[-1])
+        def disconnect(*args, **kwargs):
+            self.client.generation = 2
+            return "should not be sent"
+        with patch.object(module, "query_album_info", side_effect=disconnect) as query:
+            await self.bot.handle(event("/jm-s 123"), 1)
+            self.assertNotIn("should not be sent", self.messages())
+            self.client.calls.clear()
+            await self.bot.handle(event("hello"), 2)
+            self.assertFalse(self.client.calls)
+            self.assertEqual(query.call_count, 1)
+        self.assertFalse(self.uploads())
+        self.assertFalse(list(self.root.iterdir()))
+
+    async def test_info_query_cancellation_joins_worker_holding_shared_lock(self):
+        entered, release = threading.Event(), threading.Event()
+        def slow(album_id, job, *, session):
+            entered.set()
+            if not release.wait(5):
+                raise TimeoutError("test did not release worker")
+            session.check()
+            return "info"
+        with patch.object(module, "query_album_info", side_effect=slow):
+            active = asyncio.create_task(self.bot.handle(event("/jm-s 123"), 1))
+            try:
+                self.assertTrue(await asyncio.to_thread(entered.wait, 2))
+                self.assertEqual(self.bot.task_status()["kind"], "info")
+                self.bot.stop_download()
+                for _ in range(2):
+                    active.cancel()
+                    await asyncio.sleep(0)
+                self.assertTrue(self.bot.busy)
+                for text in ("/jm 123", "/jm-s 123"):
+                    await asyncio.wait_for(self.bot.handle(event(text), 1), 1)
+                    self.assertIn("稍后", self.messages()[-1])
+            finally:
+                release.set()
+                with self.assertRaises(asyncio.CancelledError):
+                    await active
+        self.assertFalse(self.bot.busy)
+        self.assertIsNone(self.bot.download_session)
+        self.assertFalse(self.uploads())

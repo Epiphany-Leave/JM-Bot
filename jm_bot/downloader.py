@@ -278,6 +278,40 @@ def _validate_id(album_id):
         raise DownloadFailure("invalid_id", "漫画编号必须是正整数")
 
 
+def _info_text(value, limit):
+    if not isinstance(value, str) or not value.strip() or value.strip() == "None":
+        return "未提供"
+    value = value.strip()
+    return value if len(value) <= limit else value[:limit] + "…（已截断）"
+
+
+def query_album_info(album_id: str, job_dir: Path, *, session=None) -> str:
+    """Query metadata only, using the same bounded transport as downloads."""
+    _validate_id(album_id)
+    session = session or DownloadSession()
+    session.check()
+    try:
+        client = _client(_option(job_dir, session), session)
+        album = client.get_album_detail(album_id)
+        session.check()
+        authors = "、".join(author for author in (album.authors or []) if isinstance(author, str) and author.strip())
+        text = "\n".join((
+            f"JM {_info_text(album.album_id, 40)}",
+            f"标题：{_info_text(album.name, 300)}",
+            f"作者：{_info_text(authors, 400)}",
+            f"章节数：{len(album)}",
+            f"页数：{album.page_count if album.page_count > 0 else '未提供'}",
+            f"简介：{_info_text(album.description, 1200)}",
+        ))
+        session.update(stage="complete")
+        return text
+    except DownloadFailure:
+        raise
+    except Exception:
+        session.check()
+        raise DownloadFailure("api_timeout", "漫画信息查询失败或超时，请检查下载设置后重试。") from None
+
+
 def download_pdf(album_id: str, job_dir: Path, *, session=None) -> Path:
     """Return only after every native network worker has joined."""
     _validate_id(album_id)

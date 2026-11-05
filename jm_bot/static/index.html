@@ -28,6 +28,7 @@
   <div id="app-view" class="app-shell" hidden>
     <aside class="sidebar">
       <a class="brand" href="#overview" aria-label="JM 管理台首页"><span class="brand-mark" aria-hidden="true">JM</span><span>JM 管理台<small>QQ 文件助手</small></span></a>
+      <p class="nav-label">工作台</p>
       <nav aria-label="主导航">
         <button class="nav-item active" data-tab="overview" aria-current="page"><span aria-hidden="true">◈</span> 概览</button>
         <button class="nav-item" data-tab="qq"><span aria-hidden="true">◎</span> QQ 登录</button>
@@ -38,7 +39,8 @@
     </aside>
 
     <main class="main-content">
-      <header class="page-header"><div><p class="eyebrow">JM BOT / 控制台</p><h1 id="page-title">运行概览</h1></div><span id="header-state" class="pill neutral">正在连接</span></header>
+      <div class="topbar"><span>控制台 <span aria-hidden="true">/</span> QQ 文件助手</span><span class="refresh-note">每 3 秒同步状态</span></div>
+      <header class="page-header"><div><p class="eyebrow">JM BOT / 控制台</p><h1 id="page-title">运行概览</h1><p id="page-description" class="page-description">查看账号连接、当前任务和最近处理结果。</p></div><span id="header-state" class="pill neutral" role="status">正在连接</span></header>
       <div id="global-error" class="banner error" role="alert" hidden></div>
 
       <section id="tab-overview" class="tab-panel" aria-labelledby="page-title">
@@ -51,7 +53,7 @@
           <article class="card status-card"><span class="card-label">消息通道</span><strong id="channel-state">连接中</strong><span id="channel-detail" class="status-detail">正在检查消息连接</span></article>
           <article class="card status-card"><span class="card-label">当前任务</span><strong id="task-state">等待状态</strong><span id="task-detail" class="status-detail">单次处理一本，完成后可继续</span></article>
         </div>
-        <article class="card download-progress" aria-label="当前下载进度"><h2>下载进度</h2><p data-download-progress class="result-message" role="status">暂无下载任务</p><button data-cancel-download class="secondary" type="button" disabled>停止下载</button><p class="field-note">停止后需等待正在执行的下载线程结束，才可开始下一项任务。</p><p data-cancel-feedback class="feedback" role="status" hidden></p></article>
+        <article class="card download-progress" aria-label="当前任务进度"><h2>任务进度</h2><p data-download-progress class="result-message" role="status">暂无任务</p><button data-cancel-download class="secondary" type="button" disabled>停止下载</button><p class="field-note">停止后需等待正在执行的任务结束，才可开始下一项任务。</p><p data-cancel-feedback class="feedback" role="status" hidden></p></article>
         <div class="detail-grid">
           <article class="card"><div class="section-heading"><div><p class="eyebrow">先试一试</p><h2>发送测试 PDF</h2></div><span class="subtle-icon" aria-hidden="true">↗</span></div><p class="muted">发送一份普通 PDF，检查机器人能否回传文件。每次点击只发送一次。</p>
             <form id="test-form"><label for="test-target">接收位置</label><select id="test-target" required><option value="">请先设置使用权限</option></select><button id="test-submit" class="primary" type="submit" disabled>发送测试文件</button></form>
@@ -59,7 +61,7 @@
           </article>
           <article class="card"><div class="section-heading"><div><p class="eyebrow">最近一次</p><h2>任务结果</h2></div></div><div id="result-empty" class="empty-state"><span aria-hidden="true">▤</span><p>还没有任务结果</p><small>发送指令后，可以在这里查看处理情况。</small></div><div id="result-content" hidden><span id="result-status" class="pill neutral"></span><p id="result-message" class="result-message"></p><div id="retained-file" class="path-box" hidden><span>项目目录中的保留文件</span><code id="result-path"></code><small>请先检查 QQ 是否已收到文件，再决定是否重新操作。</small></div></div></article>
         </div>
-        <aside class="instruction-strip"><strong>开始使用</strong><p>在已授权的 QQ 私聊或群聊中发送 <code>/jm &lt;本子 ID&gt;</code>，机器人会下载整本并回传 PDF。</p></aside>
+        <aside class="instruction-strip"><strong>QQ 指令</strong><div><p><code>/jm &lt;本子 ID&gt;</code> 下载整本并回传 PDF</p><p><code>/jm-s &lt;本子 ID&gt;</code> 查询标题、作者与简介</p><small>在已授权的 QQ 私聊或群聊中发送。</small></div></aside>
       </section>
 
       <section id="tab-qq" class="tab-panel" hidden aria-labelledby="page-title">
@@ -67,10 +69,10 @@
       </section>
 
       <section id="tab-permissions" class="tab-panel" hidden aria-labelledby="page-title">
-        <div class="section-intro"><div><h2>让合适的人使用</h2><p class="muted">保存后立即生效。未授权的私聊和群聊无法使用下载指令。</p></div><span id="unsaved" class="pill amber" hidden>有未保存的修改</span></div>
+        <div class="section-intro"><div><h2>让合适的人使用</h2><p class="muted">保存后立即生效。未授权的私聊和群聊无法使用下载与查询指令。</p></div><span id="unsaved" class="pill amber" hidden>有未保存的修改</span></div>
         <form id="permissions-form">
           <article class="card permission-card"><div class="section-heading"><div><p class="eyebrow">群聊权限</p><h2>允许使用的群</h2></div><button id="reload-groups" class="secondary small" type="button">刷新群列表</button></div><p class="muted">选择机器人已加入的群。未选中的群一律不开放。</p><p id="groups-feedback" class="feedback" role="status" hidden></p><div id="group-list" class="group-list" aria-label="群聊选择">正在加载群列表…</div>
-            <fieldset class="mode-fieldset"><legend>选中群聊中的哪些人可以使用？</legend><label class="radio-option"><input type="radio" name="group-mode" value="all" checked><span><strong>群内所有成员</strong><small>在选中的群里，所有成员都可以发起下载。</small></span></label><label class="radio-option"><input type="radio" name="group-mode" value="listed"><span><strong>仅下方指定的用户</strong><small>需要同时在选中的群内，且 QQ 号在用户列表中。</small></span></label></fieldset>
+            <fieldset class="mode-fieldset"><legend>选中群聊中的哪些人可以使用？</legend><label class="radio-option"><input type="radio" name="group-mode" value="all" checked><span><strong>群内所有成员</strong><small>在选中的群里，所有成员都可以下载与查询。</small></span></label><label class="radio-option"><input type="radio" name="group-mode" value="listed"><span><strong>仅下方指定的用户</strong><small>需要同时在选中的群内，且 QQ 号在用户列表中。</small></span></label></fieldset>
           </article>
           <article class="card permission-card"><p class="eyebrow">用户权限</p><h2>允许使用的 QQ 号</h2><p class="muted">这些用户可以私聊机器人。群聊选“仅指定的用户”时，也使用这份名单。</p><label for="allowed-users">QQ 号列表</label><textarea id="allowed-users" rows="5" placeholder="每行一个 QQ 号，也可以用逗号分隔" spellcheck="false" inputmode="numeric"></textarea><p class="field-note">只填写正整数 QQ 号。列表为空时，所有私聊请求都会被拒绝。</p></article>
           <div class="save-bar"><p id="permissions-feedback" class="feedback" role="status" hidden></p><button id="save-permissions" class="primary" type="submit">保存使用权限</button></div>
@@ -78,7 +80,7 @@
       </section>
       <section id="tab-download" class="tab-panel" hidden aria-labelledby="page-title">
         <div class="section-intro"><div><h2>下载设置</h2><p class="muted">推荐先用直连。修改设置后，请点击保存。</p></div><span id="download-unsaved" class="pill amber" hidden>有未保存的修改</span></div>
-        <article class="card download-progress" aria-label="当前下载进度"><h2>当前下载</h2><p data-download-progress class="result-message" role="status">暂无下载任务</p><button data-cancel-download class="secondary" type="button" disabled>停止下载</button><p class="field-note">停止后需等待正在执行的下载线程结束，才可开始下一项任务。上传、测试 PDF 和配置任务不能在这里停止。</p><p data-cancel-feedback class="feedback" role="status" hidden></p></article>
+        <article class="card download-progress" aria-label="当前任务进度"><h2>当前任务</h2><p data-download-progress class="result-message" role="status">暂无任务</p><button data-cancel-download class="secondary" type="button" disabled>停止下载</button><p class="field-note">停止后需等待正在执行的任务结束，才可开始下一项任务。上传、测试 PDF 和配置任务不能在这里停止。</p><p data-cancel-feedback class="feedback" role="status" hidden></p></article>
         <form id="download-form">
           <article class="card permission-card"><h2>下载线路</h2><label for="download-mode">使用方式</label><select id="download-mode"><option value="direct">直连（推荐）</option><option value="mihomo">内置代理</option></select><p id="download-current-mode" class="field-note">正在读取已生效的线路…</p><p id="download-busy-note" class="soft-note" hidden>正在处理任务，请等待结束后再保存设置或操作代理。</p>
           <details class="download-advanced"><summary>高级下载设置</summary><div class="settings-grid">

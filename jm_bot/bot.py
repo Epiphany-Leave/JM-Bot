@@ -9,7 +9,7 @@ from dataclasses import replace
 from functools import partial
 
 from .config import Settings, positive_id
-from .downloader import DownloadFailure, DownloadSession, detect_download, download_pdf
+from .downloader import DownloadFailure, DownloadSession, detect_download, download_pdf, query_album_info
 from .download_settings import download_settings
 from .proxy import ProxyError
 from .onebot import OneBotClient
@@ -183,8 +183,9 @@ class JMBot:
         if sender == self_id:
             return
         text = command_text(event.get("message"), self_id)
-        if not text or text.split()[0] != "/jm":
+        if not text or text.split()[0] not in ("/jm", "/jm-s"):
             return
+        command = text.split()[0]
         message_id = event.get("message_id")
         if isinstance(message_id, bool) or not isinstance(message_id, (str, int)):
             return
@@ -195,7 +196,7 @@ class JMBot:
         if group:
             authorized = group in self.settings.allowed_groups and (self.settings.group_allow_all or authorized)
         if not authorized:
-            await self._reply(target, generation, "未授权使用 /jm，请联系机器人管理员配置白名单。")
+            await self._reply(target, generation, f"未授权使用 {command}，请联系机器人管理员配置白名单。")
             return
         args = text.split()
         try:
@@ -203,18 +204,49 @@ class JMBot:
                 raise ValueError
             album_id = positive_id(args[1])
         except ValueError:
-            await self._reply(target, generation, "用法：/jm <一个正整数ID>，例如 /jm 11451。")
+            await self._reply(target, generation, f"用法：{command} <一个正整数ID>，例如 {command} 11451。")
             return
         if self._lock.locked():
             await self._reply(target, generation, "正在处理，请稍后重试。")
             return
 
         async with self._lock:
-            self.current_task = {"album_id": album_id, "stage": "下载并生成 PDF"}
+            self.current_task = {"album_id": album_id, "stage": "查询漫画信息" if command == "/jm-s" else "下载并生成 PDF"}
+            if command == "/jm-s":
+                self.current_task["kind"] = "info"
             try:
-                await self._process(album_id, group, target, generation)
+                if command == "/jm-s":
+                    await self._query_info(album_id, target, generation)
+                else:
+                    await self._process(album_id, group, target, generation)
             finally:
                 self.current_task = None
+
+    async def _query_info(self, album_id, target, generation):
+        await self._reply(target, generation, f"正在查询 JM {album_id} 的信息。")
+        if not self._available(generation):
+            return
+        try:
+            text = await self._download_worker(query_album_info, album_id, self.data_dir)
+        except DownloadFailure as exc:
+            self.last_result = {"status": "error", "message": exc.message, "code": exc.code}
+            await self._reply(target, generation, exc.message)
+            return
+        except Exception:
+            log.error("Unexpected album information query failure", exc_info=False)
+            self.last_result = {"status": "error", "message": "漫画信息查询失败，请检查下载设置后重试。"}
+            await self._reply(target, generation, self.last_result["message"])
+            return
+        if not self._available(generation):
+            self.last_result = {"status": "error", "message": "查询期间连接中断，未自动补发；请重新查询。"}
+            return
+        try:
+            await self._reply(target, generation, text)
+        except Exception:
+            log.warning("Album information reply result unconfirmed", exc_info=False)
+            self.last_result = {"status": "error", "message": "信息已查询，但回复结果未确认，请检查QQ后重试。"}
+            return
+        self.last_result = {"status": "success", "message": f"JM {album_id} 信息查询完成。"}
 
     async def _process(self, album_id, group, target, generation):
         await self._reply(target, generation, f"已开始处理 JM {album_id}，完成后发送 PDF。")

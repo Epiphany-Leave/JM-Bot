@@ -41,6 +41,8 @@ def main() -> None:
     write_zip(deployment, [
         (ROOT / "compose.yaml", "compose.yaml"),
         (ROOT / "README.md", "README.md"),
+        (ROOT / "docs" / "maintenance.md", "docs/maintenance.md"),
+        (ROOT / "docs" / "verification.md", "docs/verification.md"),
         (ROOT / "samples" / "test.pdf", "samples/test.pdf"),
     ])
     checksums = []

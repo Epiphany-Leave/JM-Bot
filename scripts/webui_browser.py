@@ -15,6 +15,40 @@ from tests.https_proxy import https_proxy
 from tests.webui_proxy_fixture import SUBSCRIPTION, local_download
 
 
+async def check_layout(page, output):
+    for width in (1440, 390):
+        await page.set_viewport_size({"width": width, "height": 900})
+        await expect(page.locator('#app-view [data-app-version]')).to_be_visible()
+        for tab in ("overview", "qq", "permissions", "download"):
+            navigation = page.locator(f'[data-tab="{tab}"]')
+            await navigation.click()
+            await expect(navigation).to_have_attribute("aria-current", "page")
+            await expect(page.locator(f"#tab-{tab}")).to_be_visible()
+            assert await page.locator('[aria-current="page"]').count() == 1
+            assert await page.locator("#page-description").inner_text()
+            assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), f"{tab}: overflow at {width}px"
+            await navigation.focus()
+            assert await navigation.evaluate("element => element === document.activeElement")
+            if width == 390 and tab in ("overview", "qq"):
+                await page.screenshot(path=output / f"16-mobile-{tab}.png", full_page=True)
+    await page.set_viewport_size({"width": 1440, "height": 1080})
+    await page.locator('[data-tab="overview"]').click()
+    # Exercise query-only rendering without changing the real bot or its network state.
+    await page.evaluate("""() => {
+        window.layoutStatus = latestStatus;
+        renderStatus({...latestStatus, busy: true, current_task: {
+            kind: 'info', album_id: '90003', stage: 'metadata', cancellable: true
+        }});
+    }""")
+    progress = page.locator('#tab-overview [data-download-progress]')
+    await expect(progress).to_contain_text('90003')
+    assert '页' not in await progress.inner_text() and '图片源' not in await progress.inner_text()
+    await expect(page.locator('#tab-overview [data-cancel-download]')).to_have_text('停止查询')
+    await expect(page.locator('#tab-overview [data-cancel-download]')).to_be_enabled()
+    await page.evaluate("renderStatus(window.layoutStatus); delete window.layoutStatus")
+    print('Layout OK: all four pages at 1440/390px, active navigation, keyboard focus, visible version, no horizontal overflow, query-only progress')
+
+
 async def check_download_ui(page, runtime, peer, output):
     await page.locator('[data-tab="download"]').click()
     await expect(page.locator("#download-save")).to_be_enabled()
@@ -195,11 +229,13 @@ async def main(channel=None):
                     peer.reject_upload = True
                     await page.locator("#test-submit").click()
                     await expect(page.locator("#test-feedback")).to_contain_text("结果未确认")
+                    await expect(page.locator("#test-feedback")).to_have_class("feedback error")
                     assert len(peer.uploads) == 2
                     assert Path(peer.uploads[1]["file"]).is_file()
                     await expect(page.locator("#result-status")).to_have_text("文件已保留")
                     await page.screenshot(path=output / "06-retained.png", full_page=True)
                     await check_download_ui(page, runtime, peer, output)
+                    await check_layout(page, output)
                     assert len(expected_http_errors) == 1, expected_http_errors
                     await page.set_viewport_size({"width": 390, "height": 844})
                     await page.locator('[data-tab="permissions"]').click()

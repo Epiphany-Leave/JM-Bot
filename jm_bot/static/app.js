@@ -72,6 +72,12 @@ function setTab(name) {
   }
   for (const panel of document.querySelectorAll('.tab-panel')) panel.hidden = panel.id !== `tab-${name}`;
   $('page-title').textContent = titles[name];
+  $('page-description').textContent = {
+    overview: '查看账号连接、当前任务和最近处理结果。',
+    qq: '连接机器人账号，扫码后在手机 QQ 上确认登录。',
+    permissions: '管理可以使用下载与查询指令的群聊和用户。',
+    download: '设置下载线路、检测连接，并查看实时进度。',
+  }[name];
   history.replaceState(null, '', `#${name}`);
   if (name === 'download' && authenticated) {
     if (!downloadLoaded) loadDownloadSettings();
@@ -109,7 +115,7 @@ function renderStatus(status) {
   const needsPermissions = online && status.config_synced && status.onebot_connected && !status.ready;
   badge('header-state', status.ready ? '已就绪' : '等待连接', status.ready ? 'green' : 'amber');
   $('ready-title').textContent = status.ready ? (status.busy ? '正在处理，请稍候' : '已就绪，可以开始使用') : needsPermissions ? '连接完成，设置使用权限' : '还差一步，连接你的机器人';
-  $('next-step').textContent = status.next_step || (status.ready ? '在已授权的私聊或群聊中发送 /jm 指令即可。' : '前往 QQ 登录，完成连接后即可开始使用。');
+  $('next-step').textContent = status.next_step || (status.ready ? '在已授权的私聊或群聊中发送指令即可。' : '前往 QQ 登录，完成连接后即可开始使用。');
   $('connect-qq').hidden = status.ready;
   $('connect-qq').textContent = needsPermissions ? '设置使用权限 →' : '前往 QQ 登录 →';
   $('connect-qq').dataset.target = needsPermissions ? 'permissions' : 'qq';
@@ -323,12 +329,15 @@ function renderDownloadProgress(status) {
   const stages = { metadata: '正在获取漫画信息', images: '正在下载图片', pdf: '正在合成 PDF', complete: '下载完成', stopping: '正在停止', downloading: '正在下载', download: '正在下载', converting: '正在合成 PDF', uploading: '正在上传', upload: '正在上传', completed: '处理完成', cancelling: '正在停止', stopped: '已停止' };
   const progress = task ? [
     task.album_id ? `本子：${task.album_id}` : '当前任务',
-    `进度：${task.completed_pages ?? '—'} / ${task.total_pages ?? '—'} 页`,
-    `图片源：${task.source || '等待选择'}`,
+    ...(task.kind === 'info' ? [] : [
+      `进度：${task.completed_pages ?? '—'} / ${task.total_pages ?? '—'} 页`,
+      `图片源：${task.source || '等待选择'}`,
+    ]),
     `阶段：${task.stop_reason ? '正在停止' : stages[task.stage] || task.stage || '等待状态'}`,
     `停止原因：${task.stop_reason || '无'}`,
-  ].join('\n') : status.busy ? '正在处理其他任务，暂无下载进度。' : '暂无下载任务';
+  ].join('\n') : status.busy ? '正在处理其他任务，暂无进度。' : '暂无任务';
   for (const element of document.querySelectorAll('[data-download-progress]')) element.textContent = progress;
+  for (const button of document.querySelectorAll('[data-cancel-download]')) button.textContent = task?.kind === 'info' ? '停止查询' : '停止下载';
   if (!status.busy) for (const element of document.querySelectorAll('[data-cancel-feedback]')) {
     element.hidden = true;
     element.textContent = '';
@@ -613,7 +622,7 @@ $('test-form').addEventListener('submit', async (event) => {
   feedback('test-feedback', '正在发送测试 PDF，请稍候…');
   try {
     const result = await api('/api/test-file', { method: 'POST', body: JSON.stringify({ kind, target_id }) });
-    const failed = ['error', 'failed', 'uncertain'].includes(result.status);
+    const failed = ['error', 'failed', 'uncertain', 'retained'].includes(result.status);
     const path = result.path ? `\n项目目录中的保留文件：${result.path}` : '';
     feedback('test-feedback', `${result.message || '请求已处理，请在 QQ 中检查文件。'}${path}`, failed);
     await pollStatus();

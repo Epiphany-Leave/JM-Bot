@@ -2,7 +2,7 @@ name: jm-bot
 
 services:
   jm-bot:
-    image: ghcr.io/epiphany-leave/jm-bot:1.1.0-rc.4
+    image: ghcr.io/epiphany-leave/jm-bot:1.1.0-rc.5
     platform: linux/amd64
     restart: unless-stopped
     environment:

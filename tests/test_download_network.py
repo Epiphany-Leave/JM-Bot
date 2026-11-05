@@ -1,4 +1,6 @@
 import io
+import base64
+import json
 import os
 import tempfile
 import threading
@@ -11,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
+from Crypto.Cipher import AES
 from PIL import Image
 from jmcomic import JmModuleConfig
 
@@ -318,6 +321,81 @@ class NetworkTests(unittest.TestCase):
         self.assertEqual([host for host, _ in self.calls], [missing, working])
         self.assertEqual(session.snapshot()["completed_pages"], 1)
         self.assertIsNone(session._failure)
+
+    def info_fixture(self, **changes):
+        # Fields and types from the installed 2.7.10 JmApiAdaptTool album schema.
+        data = dict(id=123, name="local title", author=["Alice", "Bob"], description="local introduction",
+                    likes="3", tags=["中文"], works=[], actors=[], related_list=[], is_favorite=False,
+                    liked=False, series_id="0", total_views="10", comment_total="0", series=[],
+                    total_photos="12", addtime="1700000000")
+        data.update(changes)
+        return data
+
+    def query_local_info(self, data, settings=None, use_proxy=False):
+        ts = "1700000000"
+        plaintext = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        padding = 16 - len(plaintext) % 16
+        key = jmcomic.JmCryptoTool.md5hex(ts + jmcomic.JmMagicConstants.APP_DATA_SECRET).encode()
+        encrypted = AES.new(key, AES.MODE_ECB).encrypt(plaintext + bytes([padding]) * padding)
+        host = self.server(json.dumps({"code": 200, "data": base64.b64encode(encrypted).decode()}).encode())
+        client, session = self.client(settings, f"http://{host}" if use_proxy else None)
+        client.domain_list = ["fixture.invalid" if use_proxy else host]
+        client.of_api_url = lambda path, domain: f"http://{domain}{path}"
+        tokens = (ts, *jmcomic.JmCryptoTool.token_and_tokenparam(ts))
+        with patch.object(d, "_client", return_value=client), patch.object(
+            JmModuleConfig, "FLAG_USE_FIX_TIMESTAMP", True
+        ), patch.object(JmModuleConfig, "get_fix_ts_token_tokenparam", return_value=tokens), patch.object(
+            client, "download_image", side_effect=AssertionError("metadata query downloaded an image")
+        ), patch.object(d.img2pdf, "convert", side_effect=AssertionError("metadata query created PDF")):
+            text = d.query_album_info("123", self.job, session=session)
+        self.assertEqual(session.snapshot()["stage"], "complete")
+        self.assertFalse(list(self.job.iterdir()))
+        return text
+
+    def test_metadata_real_http_decryption_native_mapping_and_no_download(self):
+        text = self.query_local_info(self.info_fixture())
+        self.assertIn("标题：local title", text)
+        self.assertIn("作者：Alice、Bob", text)
+        self.assertIn("简介：local introduction", text)
+        self.assertIn("页数：12", text)
+        self.assertIn("章节数：1", text)
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0][1], "/album?id=123")
+
+    def test_metadata_null_empty_and_long_fields_are_honest_and_bounded(self):
+        text = self.query_local_info(self.info_fixture(author=[], description=None, total_photos="0"))
+        self.assertIn("作者：未提供", text)
+        self.assertIn("简介：未提供", text)
+        self.assertIn("页数：未提供", text)
+        text = self.query_local_info(self.info_fixture(author=None, description=""))
+        self.assertIn("作者：未提供", text)
+        self.assertIn("简介：未提供", text)
+        text = self.query_local_info(self.info_fixture(description="简介" * 1500, name="title" * 300))
+        self.assertLess(len(text), 2300)
+        self.assertEqual(text.count("（已截断）"), 2)
+
+    def test_metadata_native_missing_album_maps_to_invalid_id(self):
+        with self.assertRaises(d.DownloadFailure) as failure:
+            self.query_local_info(self.info_fixture(name=None))
+        self.assertEqual(failure.exception.code, "invalid_id")
+        self.assertNotIn("http", failure.exception.message)
+
+    def test_metadata_query_uses_saved_mihomo_proxy(self):
+        text = self.query_local_info(self.info_fixture(), {"mode": "mihomo"}, use_proxy=True)
+        self.assertIn("local introduction", text)
+        self.assertEqual(self.calls[0], ("fixture.invalid", "http://fixture.invalid/album?id=123"))
+
+    def test_metadata_query_invalid_id_and_budget_skip_network(self):
+        for album_id in ("0", "-1", "1 2", 123):
+            with self.assertRaises(d.DownloadFailure) as failure:
+                d.query_album_info(album_id, self.job)
+            self.assertEqual(failure.exception.code, "invalid_id")
+        session = d.DownloadSession()
+        with patch.object(d.time, "monotonic", return_value=session._start + 61), patch.object(d, "_client") as factory:
+            with self.assertRaises(d.DownloadFailure) as failure:
+                d.query_album_info("123", self.job, session=session)
+            self.assertEqual(failure.exception.code, "api_timeout")
+            factory.assert_not_called()
 
 
 if __name__ == "__main__":

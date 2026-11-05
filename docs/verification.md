@@ -1,5 +1,17 @@
 # 验证记录
 
+## 1.1.0-rc.5 候选版
+
+日期：2026-11-05（Asia/Shanghai）。新增 `/jm-s <ID>` 元数据查询，整理管理页布局，并将维护内容移出 README。
+
+- Windows Python 3.12：120 项测试通过。本机加密 HTTP 回包经过原生 API 解密、适配器和 `JmAlbumDetail`，验证标题、多人作者、简介、缺失值、截断、无效 ID、代理传输；查询不下载图片、不生成 PDF。命令验证覆盖原有授权、格式、群聊提及、去重、忙碌、取消等待线程退出、断线不补发，以及回复结果未确认时不标记成功。
+- 真实 Edge 浏览器：登录、扫码、权限、测试 PDF、订阅导入和安全错误、代理选择、下载设置、检测与停止、HTTPS 转发通过。另检查四个页面的桌面 / 390px 手机布局、导航选中、键盘焦点、动态版本和查询任务的元数据进度；无横向溢出。故意触发的订阅 HTTP 503 单独记录，其他控制台错误和 JS 异常为 0。
+- 界面截图位于 `.cache/webui-browser/`，包括 `05-ready.png`、`10-download-settings.png` 和 `16-mobile-overview.png`。主按钮白字与背景对比度约 5.19:1；资源随镜像提供，没有新增外部字体或 CDN。
+- README 保留安装、网页设置、命令和必要排错；维护文档独立。部署 ZIP 新增 `docs/maintenance.md` 和 `docs/verification.md`，源码和部署包均使用公开文件白名单，不包含运行数据。
+- Linux 构建、真实 Mihomo、Compose 重建以及发布和匿名拉取等待本版 CI 验证，不沿用 rc.4 结论。
+
+尚未验证真实 QQ 和上游元数据 / 下载服务、用户主机网络，以及 Windows Docker Desktop 实机；当前开发机没有 Docker CLI 或 Docker Desktop。自动化中的 QQ、元数据和节点均为受控测试服务，不能替代现场验收。
+
 ## 1.1.0-rc.4 候选版
 
 日期：2026-11-01（Asia/Shanghai）。本版保留三个服务，修复订阅链接获取、旧入口响应缓存和版本识别，并将 README 改为 Linux / Windows 部署说明。

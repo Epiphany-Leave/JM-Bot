@@ -1,5 +1,17 @@
 # 独立 JM-Bot 的交付决策
 
+## rc.5 信息查询与管理页整理
+
+新增 `/jm-s <ID>`，复用 `jmcomic` 的本子信息接口，只回复标题、作者、简介等文字，不请求图片或生成 PDF。查询与下载使用相同的授权、单任务限制、后台线程、网络方式和超时控制；信息缺失时明确显示“未提供”，不使用库的默认作者作为真实作者。网页将信息查询标为查询任务，避免显示图片下载进度。
+
+管理页借鉴 AstrBot 的侧栏、顶栏、卡片和浅色主题，继续使用随镜像打包的 HTML/CSS/JavaScript，不引入其框架或外部资源。参考：[FullLayout.vue](https://github.com/AstrBotDevs/AstrBot/blob/master/dashboard/src/layouts/full/FullLayout.vue)、[LightTheme.ts](https://github.com/AstrBotDevs/AstrBot/blob/master/dashboard/src/theme/LightTheme.ts)。
+
+README 面向首次使用者，只保留安装、网页设置、命令和必要排错；升级、备份、恢复等维护内容移至独立文档，部署包同时包含维护说明和验证记录，避免离线阅读时链接失效。
+
+rc.5 通过本轮代码、浏览器、容器和匿名拉取检查前，不沿用 rc.4 的发布结论；真实 QQ 与用户下载源仍需现场验收。
+
+## 既有部署与运行决策
+
 统一管理页让用户只填一个 `ADMIN_PASSWORD`，在同一网页完成 QQ、权限、文件测试和下载设置。rc.4 保留 rc.3 的下载控制与内置代理，改进跨平台部署、订阅获取和错误提示。部署目标是支持 Docker Linux 容器的 x86-64 主机；Linux 使用 Engine 与 Compose，Windows 推荐 Docker Desktop 的 WSL 2 后端。原有 AstrBot 可继续独立运行，无需为本项目在宿主机安装 Python、VPN GUI 或 Clash Verge。rc.4 已发布并通过 Linux、真实 Mihomo、浏览器和匿名拉取检查；Windows Docker Desktop 及用户现场仍未实机验收，旧版本检查不代替本版验收。
 
 | 决策 | 原因与边界 |
