@@ -8,7 +8,8 @@
 - 真实 Edge 浏览器：登录、扫码、权限、测试 PDF、订阅导入和安全错误、代理选择、下载设置、检测与停止、HTTPS 转发通过。另检查四个页面的桌面 / 390px 手机布局、导航选中、键盘焦点、动态版本和查询任务的元数据进度；无横向溢出。故意触发的订阅 HTTP 503 单独记录，其他控制台错误和 JS 异常为 0。
 - 界面截图位于 `.cache/webui-browser/`，包括 `05-ready.png`、`10-download-settings.png` 和 `16-mobile-overview.png`。主按钮白字与背景对比度约 5.19:1；资源随镜像提供，没有新增外部字体或 CDN。
 - README 保留安装、网页设置、命令和必要排错；维护文档独立。部署 ZIP 新增 `docs/maintenance.md` 和 `docs/verification.md`，源码和部署包均使用公开文件白名单，不包含运行数据。
-- Linux 构建、真实 Mihomo、Compose 重建以及发布和匿名拉取等待本版 CI 验证，不沿用 rc.4 结论。
+- [Linux CI](https://github.com/Epiphany-Leave/JM-Bot/actions/runs/41974525704) 的 120 项测试、Chromium 桌面 / 手机布局、真实 Mihomo、镜像构建及 Compose 目录 / 共享读取 / 重建检查均通过。
+- 候选镜像 `ghcr.io/epiphany-leave/jm-bot:1.1.0-rc.5` 已发布。独立任务使用空 `DOCKER_CONFIG` 匿名拉取，并再次通过目录自动创建、认证、共享 PDF 读取和重建恢复。[发布与匿名验证](https://github.com/Epiphany-Leave/JM-Bot/actions/runs/41974861608)。源码提交 `f26e33fbabc0ff314590f0c067913bff43db3752`，标签 `v1.1.0-rc.5`，推送与拉取摘要一致：`sha256:e929a0b44a862d743532d97cfc20d25f43215cb8265193e11931d1fa19087c7e`。
 
 尚未验证真实 QQ 和上游元数据 / 下载服务、用户主机网络，以及 Windows Docker Desktop 实机；当前开发机没有 Docker CLI 或 Docker Desktop。自动化中的 QQ、元数据和节点均为受控测试服务，不能替代现场验收。
 
