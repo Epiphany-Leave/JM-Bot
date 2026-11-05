@@ -2,7 +2,7 @@
 
 QQ 中发送 `/jm <ID>`，下载全部章节、确认完整后合成 PDF 并发回当前会话；`/jm-s <ID>` 查询标题、作者和简介。使用独立 QQ 小号，通过 Docker Compose 部署。
 
-**`1.1.1` 待发布**。部署时无需填写密码；首次打开网页设置管理密码，再完成扫码、权限、测试 PDF 和线路设置，无需安装 Python 或代理客户端。镜像面向 x86-64 / `linux/amd64`；发布与现场验收范围见[验证记录](https://github.com/Epiphany-Leave/jm-bot/blob/main/docs/verification.md)。
+**`1.1.1` 已发布并通过免登录拉取验证**。部署时无需填写密码；首次打开网页设置管理密码，再完成扫码、权限、测试 PDF 和线路设置，无需安装 Python 或代理客户端。镜像面向 x86-64 / `linux/amd64`；发布与现场验收范围见[验证记录](https://github.com/Epiphany-Leave/jm-bot/blob/main/docs/verification.md)。
 
 ## 初次部署
 

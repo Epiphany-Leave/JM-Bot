@@ -6,8 +6,10 @@
 
 - Windows Python 3.12：128 项测试通过。覆盖未配置时管理 API 隔离、短 / 中文密码、确认不符、并发首次设置、旧密码迁移且新记录优先、损坏记录拒绝启动、原子保存失败、会话失效、限速、来源校验、HTTPS Cookie，以及恢复命令只处理已有配置。
 - 真实 Edge：首次设置单字符密码、刷新 / 登出 / 登录、修改为中文密码、旧密码和旧会话失效、新密码登录、弹窗取消与 Escape 清空、手机版面均通过；原有 QQ / 权限 / 下载 / 代理 / HTTPS 流程回归通过。首次设置流程无控制台或 JS 错误；原流程故意触发的 HTTP 503 单独记录，其他错误为 0。截图 `.cache/webui-browser/17-first-setup.png` 至 `20-mobile-password.png`。
-- Docker 检查新增无密码环境启动、网页设置短中文密码、密码哈希重建持久化、网页改密失效旧会话及交互式本地恢复；真实容器结果等待 Linux CI。恢复验证比较除密码记录外的完整业务配置指纹，确认权限、内部口令和输出文件保留。
-- Compose 和 README 不再要求填写 `ADMIN_PASSWORD`；旧环境变量仅用于首次导入兼容。发布和匿名拉取等待本版本任务，不沿用 rc.5 的结论。
+- [Linux CI](https://github.com/Epiphany-Leave/JM-Bot/actions/runs/41977712997) 已通过 128 项测试、Chromium、真实 Mihomo 及 Docker 检查：无密码环境启动、网页设置短中文密码、密码哈希重建持久化、网页改密失效旧会话和交互式本地恢复。恢复验证比较除密码记录外的完整业务配置指纹，确认权限、内部口令和输出文件保留。
+- Compose 和 README 不再要求填写 `ADMIN_PASSWORD`；旧环境变量仅用于首次导入兼容。
+- 镜像 `ghcr.io/epiphany-leave/jm-bot:1.1.1` 已发布，[发布任务及独立匿名验证任务](https://github.com/Epiphany-Leave/JM-Bot/actions/runs/41978062622) 均成功。源码提交 `a6bee3ec8bc0f396deddaa8cccf6d055d21a6260`，标签 `v1.1.1`。注册表匿名读取 `1.1.1` 的 OCI 清单摘要为 `sha256:2973d3f242280829473b5196ebfe53d1cbace2e8f4a75e290a569e4b65c7cf82`，包含 `linux/amd64` 镜像。
+- 本轮 GitHub 连接工具短暂中断，发布结果改由公开运行 / job 页面核对，两项任务均为成功；另使用无账户凭据的注册表接口确认版本和摘要。此前 Linux CI 的完整日志已核对，包括网页设密、改密、重建以及交互式恢复通过。
 
 尚未验证用户真实主机、QQ / 上游服务与 Windows Docker Desktop；当前开发机未安装 Docker CLI 或 Desktop，实际容器检查在 Linux CI 执行。
 
